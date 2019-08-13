@@ -8,9 +8,11 @@ Has only been tested on Linux.
 $ make
 
 ## Quick Start
-Given up to thousands of text files with one number per line, generate a sequence distance matrix and a consensus sequence using the following command:
+Given up to thousands of text files with one number per line, generate 1) a sequence distance matrix and 2) a consensus sequence using the following command:
 
 $ openDBA text float global 0.005 output_prefix input_numeric_series*.txt
+
+Outputs are in output_prefix.pair_dists.txt and output_prefix.avg.txt
 
 ## Licensing
 This code is distributed under the GNU Public License v2.  Please contact the author, Paul Gordon (gordonp@ucalgary.ca), for alternative licensing possibilities.
@@ -28,8 +30,8 @@ DBA is the algorithm for optimal alignment of multiple numeric sequences to each
 $ openDBA text float open_end 0.005 foo numeric_series*.txt
 
 $ R
-> tab <- read.table("foo.pair_dists.txt", sep="\t", row.names=1, header=FALSE)
-> colnames(tab) <- rownames(tab)
-> dis <- as.dist(t(tab2), diag=TRUE)
-> hc <- hclust(dis)
-> plot(hc)
+  tab <- read.table("foo.pair_dists.txt", sep="\t", row.names=1, header=FALSE)
+  colnames(tab) <- rownames(tab)
+  dis <- as.dist(t(tab2), diag=TRUE)
+  hc <- hclust(dis)
+  plot(hc)
