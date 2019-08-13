@@ -5,6 +5,12 @@
 
 #include "cuda_utils.hpp"
 
+#if DOUBLE_UNSUPPORTED == 1
+#define ACCUMULATOR_PRIMITIVE_TYPE float
+#else
+#define ACCUMULATOR_PRIMITIVE_TYPE double
+#endif
+
 template<typename T>
 __global__ void calc_sums(T *sequences, size_t maxSeqLength, size_t num_sequences, size_t *sequence_lengths, T *sequence_sums){
         __shared__ float warp_sums[CUDA_WARP_WIDTH];
@@ -43,7 +49,7 @@ __global__ void calc_sums(T *sequences, size_t maxSeqLength, size_t num_sequence
 }
 
 template<typename T>
-__global__ void calc_sum_of_squares(T *sequences, size_t maxSeqLength, size_t num_sequences, size_t *sequence_lengths, T *sequence_sums, double *sequence_sum_of_squares){
+__global__ void calc_sum_of_squares(T *sequences, size_t maxSeqLength, size_t num_sequences, size_t *sequence_lengths, T *sequence_sums, ACCUMULATOR_PRIMITIVE_TYPE *sequence_sum_of_squares){
         __shared__ float warp_sums_of_squares[CUDA_WARP_WIDTH];
 
         // grid X index is the sequence to be processed, grid Y is the chunk of that sequence to process (each chunk is thread block sized)
@@ -81,7 +87,7 @@ __global__ void calc_sum_of_squares(T *sequences, size_t maxSeqLength, size_t nu
 
 // Z-norm
 template<typename T>
-__global__ void rescale_sequences(T *sequences, size_t maxSeqLength, size_t num_sequences, size_t *sequence_lengths, T *sequence_sums, double *sequence_sum_of_squares, double target_mean, double target_stddev){
+__global__ void rescale_sequences(T *sequences, size_t maxSeqLength, size_t num_sequences, size_t *sequence_lengths, T *sequence_sums, ACCUMULATOR_PRIMITIVE_TYPE *sequence_sum_of_squares, double target_mean, double target_stddev){
         // grid X index is the sequence to be processed, grid Y is the chunk of that sequence to process (each chunk is thread block sized)
         size_t seq_pos = blockIdx.y*blockDim.x+threadIdx.x;
         size_t seq_length = sequence_lengths[blockIdx.x];
@@ -104,7 +110,7 @@ __host__ void normalizeSequences(T **sequences, size_t maxSeqLength, size_t num_
         T *sequence_sums;
         cudaMalloc(&sequence_sums, sizeof(T)*num_sequences);  CUERR("Allocating GPU memory for sequence means");
         calc_sums<<<gridDim,threadblockDim,shared_memory_required,stream>>>(sequences[0], maxSeqLength, num_sequences, sequence_lengths[0], sequence_sums); CUERR("Calculating sequence sum");
-        double *sequence_sum_of_squares;
+        ACCUMULATOR_PRIMITIVE_TYPE *sequence_sum_of_squares;
         cudaMalloc(&sequence_sum_of_squares, sizeof(double)*num_sequences);  CUERR("Allocating GPU memory for sequence residuals' sum of squares");
         calc_sum_of_squares<<<gridDim,threadblockDim,shared_memory_required,stream>>>(sequences[0], maxSeqLength, num_sequences, sequence_lengths[0], sequence_sums, sequence_sum_of_squares); CUERR("Calculating sequence sum of squares");
 
