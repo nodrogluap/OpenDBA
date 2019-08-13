@@ -18,7 +18,7 @@ openDBA text float global 0.005 output_prefix input_numeric_series*.txt
 Outputs are in `output_prefix.pair_dists.txt` and `output_prefix.avg.txt`
 
 ## Licensing
-This code is distributed under the GNU Public License v2.  Please contact the author, Paul Gordon (gordonp@ucalgary.ca), for alternative licensing possibilities.
+This code is distributed under the GNU Public License v3.  Please contact the author, Paul Gordon (gordonp@ucalgary.ca), for alternative licensing possibilities.
 
 ## Method details (or, Why Should I Use This?)
 
