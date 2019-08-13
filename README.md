@@ -24,7 +24,7 @@ If you have up to thousands of text files with one number per line, generate (1)
 ```bash
 openDBA text float global 0.005 output_prefix input_numeric_series*.txt
 ```
-Outputs are in `output_prefix.pair_dists.txt` and `output_prefix.avg.txt`
+Outputs are in `output_prefix.pair_dists.txt` and `output_prefix.avg.txt`. See all command line options by running the program without any arguments.
 
 ## Licensing
 This code is distributed under the GNU Public License v3.  Please contact the author, Paul Gordon (gordonp@ucalgary.ca), for alternative licensing possibilities.
