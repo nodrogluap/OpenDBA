@@ -27,11 +27,15 @@ DBA is the algorithm for optimal alignment of multiple numeric sequences to each
 
 3. The results of the initial all-vs-all DTW comparisons are stored to a distance matrix file (upper right format), so that it can be loaded into other software to do cluster analysis. For example, to perform complete linkage clustering and visualization of the time-warp corrected sequences (some series truncated, so open end mode required), using the R programming language:
 
-$ openDBA text float open_end 0.005 foo numeric_series*.txt
+```bash
+openDBA text float open_end 0.005 foo numeric_series*.txt
+R
+```
 
-$ R
+```R
   tab <- read.table("foo.pair_dists.txt", sep="\t", row.names=1, header=FALSE)
   colnames(tab) <- rownames(tab)
   dis <- as.dist(t(tab2), diag=TRUE)
   hc <- hclust(dis)
   plot(hc)
+```
