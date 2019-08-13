@@ -22,7 +22,7 @@ make DOUBLE_UNSUPPORTED=1
 If you have up to thousands of text files with one number per line, generate (1) a sequence distance matrix and (2) a consensus sequence using the following command:
 
 ```bash
-openDBA text float global 0.005 output_prefix input_numeric_series*.txt
+openDBA text float global output_prefix 0.05 input_numeric_series*.txt
 ```
 Outputs are in `output_prefix.pair_dists.txt` and `output_prefix.avg.txt`. See all command line options by running the program without any arguments.
 
@@ -40,7 +40,7 @@ DBA is the algorithm for optimal alignment of multiple numeric sequences to each
 3. The results of the initial all-vs-all DTW comparisons are stored to a distance matrix file (upper right format), so that it can be loaded into other software to do cluster analysis. For example, to perform complete linkage clustering and visualization of the time-warp corrected sequences (some series truncated, so open end mode required), using the R programming language:
 
 ```bash
-openDBA text float open_end 0.005 foo numeric_series*.txt
+openDBA text float open_end foo 0.05 numeric_series*.txt
 R
 ```
 
