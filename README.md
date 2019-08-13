@@ -5,9 +5,18 @@ GPU-accelerated Dynamic Time Warp (DTW) Barycenter Averaging
 
 ## Compiling
 Requires CUDA Toolkit 7 or later: https://developer.nvidia.com/cuda-toolkit
-Has only been tested on Linux.
 
-$ make
+This code has only been tested on Linux.
+
+```bash
+make
+```
+
+If you want to run this code on a GPU with Compute Capability less than 6.1 (manufactured before ~2016), you will need to remove the double precision floating point support from openDBA.cu by compiling like so:
+
+```bash
+DOUBLE_SUPPORT=0 make
+```
 
 ## Quick Start
 If you have up to thousands of text files with one number per line, generate (1) a sequence distance matrix and (2) a consensus sequence using the following command:
