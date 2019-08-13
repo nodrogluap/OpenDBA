@@ -187,22 +187,25 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
                 mats << "\t";
         }
 	mats << "0" << std::endl;
-	mats.close();
 
 	// Pick the smallest squared distance across all the sequences.
 	int medoidIndex = -1;
-	T lowestSoS = numeric_limits<T>::max();
+	T lowestSoS = std::numeric_limits<T>::max();
 	for(size_t i = 0; i < num_sequences-1; ++i){
 		if (dtwSoS[i] < lowestSoS) {
 			medoidIndex = i;
 			lowestSoS = dtwSoS[i];
 		}
 	}
-	std::cerr << std::endl <<"Input medoid index is " << medoidIndex << std::endl;
 
 	cudaFreeHost(dtwSoS); CUERR("Freeing CPU memory for DTW pairwise distance sum of squares");
 	cudaFreeHost(cpu_dtwPairwiseDistances); CUERR("Freeing page locked CPU memory for DTW pairwise distances");
-	cudaFree(gpu_dtwPairwiseDistances); CUERR("Freeing GPU memory for DTW pairwise distances");
+	for(int i = 0; i < deviceCount; i++){
+		cudaSetDevice(i);
+		cudaFree(gpu_dtwPairwiseDistances[i]); CUERR("Freeing GPU memory for DTW pairwise distances");
+	}
+	cudaFreeHost(gpu_dtwPairwiseDistances); CUERR("Freeing CPU memory for GPU DTW pairwise distancesa' pointers");
+	mats.close();
 	return medoidIndex;
 }
 
@@ -429,10 +432,11 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
         // Pick a seed sequence from the original input, with the smallest L2 norm.
 	size_t medoidIndex = approximateMedoidIndex(gpu_sequences, maxLength, num_sequences, sequence_lengths, sequence_names, gpu_sequence_lengths, use_open_start, use_open_end, output_prefix, stream);
         size_t medoidLength = sequence_lengths[medoidIndex];
-	//std::cerr << "Initial medoid has length " << medoidLength << std::endl;
+	std::cerr << std::endl << "Initial medoid " << sequence_names[medoidIndex] << " has length " << medoidLength << std::endl;
 	T *gpu_barycenter = 0;
+	cudaSetDevice(0);
 	cudaMalloc(&gpu_barycenter, sizeof(T)*medoidLength); CUERR("Allocating GPU memory for DBA result");
-        cudaMemcpyAsync(gpu_barycenter, gpu_sequences+maxLength*medoidIndex, medoidLength*sizeof(T), cudaMemcpyDeviceToDevice, stream);  CUERR("Copying medoid seed to GPU memory");
+        cudaMemcpyAsync(gpu_barycenter, gpu_sequences[0]+maxLength*medoidIndex, medoidLength*sizeof(T), cudaMemcpyDeviceToDevice, stream);  CUERR("Copying medoid seed to GPU memory");
 
 	// Z-normalize the sequences in parallel on the GPU, once all the async memcpy calls are done.
         // Refine the alignment iteratively.
@@ -470,11 +474,11 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 
 	// Clean up the GPU memory we don't need any more.
         cudaFree(gpu_barycenter); CUERR("Freeing GPU memory for barycenter");
-	for(int i = 0; i < num_sequences; i++){
+	for(int i = 0; i < deviceCount; i++){
 		cudaFree(gpu_sequences[i]); CUERR("Freeing GPU memory for sequence");
 	} 
 	cudaFreeHost(gpu_sequences); CUERR("Freeing CPU memory for GPU sequence pointer array");
-	for(int i = 0; i < num_sequences; i++){
+	for(int i = 0; i < deviceCount; i++){
 		cudaFree(gpu_sequence_lengths[i]); CUERR("Freeing GPU memory for sequence lengths");
 	} 
 	cudaFreeHost(gpu_sequence_lengths); CUERR("Freeing GPU memory for the sequence lengths pointer array");

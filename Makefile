@@ -5,11 +5,15 @@ DOUBLE_UNSUPPORTED=0
 # For kernel-side sqrt() support
 NVCC_FLAGS+= --expt-relaxed-constexpr
 
+ifeq ($(DEBUG),1)
+  NVCC_FLAGS+= -g -G
+endif
+
 ifeq ($(DOUBLE_UNSUPPORTED),0)
   NVCC_FLAGS+= -arch=sm_61
 endif
 
 all: $(PROGNAME)
 
-$(PROGNAME): openDBA.cu multithreading.o cpu_utils.hpp gpu_utils.hpp dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
+$(PROGNAME): Makefile openDBA.cu multithreading.o cpu_utils.hpp gpu_utils.hpp dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
 	nvcc -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) $(NVCC_FLAGS) openDBA.cu multithreading.o -o $(PROGNAME)

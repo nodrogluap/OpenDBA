@@ -25,6 +25,10 @@ setupAndRun(char **series_file_names, int num_series, char *output_prefix, int b
         performDBA<T>(sequences, num_series, sequence_lengths, series_file_names, convergence_delta, use_open_start, use_open_end, output_prefix, (T **) &averageSequence, &averageSequenceLength);
 
 	std::ofstream avg_file((std::string(output_prefix)+std::string(".avg.txt")).c_str());
+	if(!avg_file.is_open()){
+		std::cerr << "Cannot open sequence averages file for writing" << std::endl;
+		exit(3);
+	}
         for (size_t i = 0; i < averageSequenceLength; ++i) { avg_file << ((T *) averageSequence)[i] << std::endl; }
 	avg_file.close();
 
@@ -49,9 +53,9 @@ int main(int argc, char **argv){
      	}
 
 	int num_series = argc-6;
-	double convergence_delta = atof(argv[4]);
+	double convergence_delta = atof(argv[5]);
 	if(convergence_delta <= 0.0 || convergence_delta > 1){
-		std::cerr << "Fourth argument (" << argv[3] << ") could not be parsed into a number in the acceptable range (0,1]" << std::endl;
+		std::cerr << "Fifth argument (" << argv[3] << ") could not be parsed into a number in the acceptable range (0,1]" << std::endl;
 		exit(1);
 	} 
 	int binary_read_mode = 0;
@@ -82,7 +86,7 @@ int main(int argc, char **argv){
                 exit(1);
 	}
 
-	char *output_prefix = argv[5];
+	char *output_prefix = argv[4];
 
 	int argind = 6; // Where the file names start
 	// The following are all the data types supported by CUDA's atomicAdd() operation, so we support them too for best value precision maintenance.
