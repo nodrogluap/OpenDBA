@@ -15,7 +15,7 @@ make
 If you want to run this code on a GPU with Compute Capability less than 6.1 (manufactured before ~2016), you will need to remove the double precision floating point support from openDBA.cu by compiling like so:
 
 ```bash
-DOUBLE_SUPPORT=0 make
+make DOUBLE_UNSUPPORTED=1
 ```
 
 ## Quick Start
