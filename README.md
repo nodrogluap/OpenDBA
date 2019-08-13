@@ -10,7 +10,7 @@ Has only been tested on Linux.
 $ make
 
 ## Quick Start
-Given up to thousands of text files with one number per line, generate (1) a sequence distance matrix and (2) a consensus sequence using the following command:
+If you have up to thousands of text files with one number per line, generate (1) a sequence distance matrix and (2) a consensus sequence using the following command:
 
 ```bash
 openDBA text float global 0.005 output_prefix input_numeric_series*.txt
