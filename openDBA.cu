@@ -77,7 +77,7 @@ int main(int argc, char **argv){
         else if(!strcmp(argv[3],"open_end")){
 		use_open_end = 1;
         }
-	else if(strcmp(argv[3],"open")){
+	else if(!strcmp(argv[3],"open")){
 		use_open_start = 1;
 		use_open_end = 1;
         }
