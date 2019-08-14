@@ -33,7 +33,7 @@ __global__ void calc_sums(T *sequences, size_t maxSeqLength, size_t num_sequence
         }
         __syncthreads();
 
-        int warp_limit = (int) ceilf(blockDim.x/CUDA_WARP_WIDTH);
+        int warp_limit = (int) ceilf(blockDim.x/((double) CUDA_WARP_WIDTH));
         // Reduce the whole threadblock
         if(threadIdx.x < CUDA_WARP_WIDTH){
                 warp_sum = threadIdx.x < warp_limit ? warp_sums[threadIdx.x] : 0;
@@ -70,7 +70,7 @@ __global__ void calc_sum_of_squares(T *sequences, size_t maxSeqLength, size_t nu
         }
         __syncthreads();
 
-        int warp_limit = (int) ceilf(blockDim.x/CUDA_WARP_WIDTH);
+        int warp_limit = (int) ceilf(blockDim.x/((double) CUDA_WARP_WIDTH));
         // Reduce the whole threadblock
         if(threadIdx.x < CUDA_WARP_WIDTH){
                 warp_sum = threadIdx.x < warp_limit ? warp_sums_of_squares[threadIdx.x] : 0;
@@ -102,7 +102,7 @@ template<typename T>
 __host__ void normalizeSequences(T **sequences, size_t maxSeqLength, size_t num_sequences, size_t **sequence_lengths, int refSequenceIndex, size_t maxLength, cudaStream_t stream){
         // grid X index is the sequence to be processed, grid Y is the chunk of that sequence to process (each chunk is thread block sized)
         dim3 threadblockDim(CUDA_WARP_WIDTH*CUDA_WARP_WIDTH, 1, 1);
-        dim3 gridDim(num_sequences, (int) ceilf(maxLength/threadblockDim.x), 1);
+        dim3 gridDim(num_sequences, (int) ceilf(maxLength/((double) threadblockDim.x)), 1);
         int shared_memory_required = sizeof(T)*CUDA_WARP_WIDTH;
 
 	// Most efficient way to do this (power and memory usage wise) is to just use the first device to compute the normalization, then copy the data between the devices.
