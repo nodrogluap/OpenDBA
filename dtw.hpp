@@ -120,18 +120,16 @@ __global__ void DTWDistance(T *second_seq_input, size_t second_seq_input_length,
 			}
 
 			// Use the White-Neely step pattern (a diagonal move is preferred to right-up or up-right if costs are equivalent).
+			int used_open_right_end_cost = 0;
 			if(use_open_end && i-threadIdx.x == first_seq_length-1 && (threadIdx.x != 0 || offset_within_second_seq != 0)){
 				// No extra cost to consume a sequence element from the first sequence, just copy it over from the previous column.
-				costs[threadIdx.x+blockDim.x*(i%3)] = costs[threadIdx.x+blockDim.x*((i-1)%3)];
-				if(pathMatrix != 0){
-					// Path coordinates are global, not threadblock local like the dtwCostSoFar.
-					pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = OPEN_RIGHT;
-				}
+				right_cost = costs[(threadIdx.x-1)+blockDim.x*((i-1)%3)];
+				used_open_right_end_cost = 1;
 			}
 			else if(diag_cost > up_cost){
 				if(up_cost > right_cost){
 					costs[threadIdx.x+blockDim.x*(i%3)] = right_cost;
-					if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = RIGHT;}
+					if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = used_open_right_end_cost ? OPEN_RIGHT : RIGHT;}
 				}
 				else{
 					costs[threadIdx.x+blockDim.x*(i%3)] = up_cost;
@@ -141,7 +139,7 @@ __global__ void DTWDistance(T *second_seq_input, size_t second_seq_input_length,
 			else{
 				if(diag_cost > right_cost){
 					costs[threadIdx.x+blockDim.x*(i%3)] = right_cost;
-                                        if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = RIGHT;}
+                                        if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = used_open_right_end_cost ? OPEN_RIGHT : RIGHT;}
 				}
 				else{
 					costs[threadIdx.x+blockDim.x*(i%3)] = diag_cost;
