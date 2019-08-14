@@ -6,13 +6,14 @@
 
 using namespace cudahack; // for device side numeric_limits
 
-__device__ __constant__ unsigned char NIL = 255; // sentinel value for the start of the DTW alignment, the stop condition for backtracking (ergo has no corresponding moveI or moveJ)
-__device__ __constant__ unsigned char DIAGONAL = 0;
-__device__ __constant__ unsigned char RIGHT = 1;
-__device__ __constant__ unsigned char UP = 2;
+// sentinel value for the start of the DTW alignment, the stop condition for backtracking (ergo has no corresponding moveI or moveJ)
+#define NIL 255 
+#define DIAGONAL 0
+#define RIGHT 1
+#define UP 2
 // Special move designations that do not affect backtracking algorithm per se, but does affect cost (open=no accumulation of cost for rightward move). 
-__device__ __constant__ unsigned char OPEN_RIGHT = 3; 
-__device__ __constant__ unsigned char NIL_OPEN_RIGHT = 254; 
+#define OPEN_RIGHT 3 
+#define NIL_OPEN_RIGHT 254 
 
 // For two series I & J, encode that the cost matrix DTW path (i,j) backtracking index decrement options for the DTW steps declared above are:
 // DIAGONAL => (-1,-1), RIGHT => (0,-1), UP => (-1,0), OPEN_RIGHT => (0,-1)
