@@ -8,17 +8,17 @@ using namespace cudahack; // for device side numeric_limits
 
 // sentinel value for the start of the DTW alignment, the stop condition for backtracking (ergo has no corresponding moveI or moveJ)
 #define NIL 255 
-#define DIAGONAL 0
-#define RIGHT 1
-#define UP 2
+#define DIAGONAL 1
+#define RIGHT 2
+#define UP 3
 // Special move designations that do not affect backtracking algorithm per se, but does affect cost (open=no accumulation of cost for rightward move). 
-#define OPEN_RIGHT 3 
+#define OPEN_RIGHT 4 
 #define NIL_OPEN_RIGHT 254 
 
 // For two series I & J, encode that the cost matrix DTW path (i,j) backtracking index decrement options for the DTW steps declared above are:
 // DIAGONAL => (-1,-1), RIGHT => (0,-1), UP => (-1,0), OPEN_RIGHT => (0,-1)
-__device__ __constant__ short moveI[] = { -1, 0, -1, 0 };
-__device__ __constant__ short moveJ[] = { -1, -1, 0, -1 };
+__device__ __constant__ short moveI[] = { -1, -1, 0, -1, 0 };
+__device__ __constant__ short moveJ[] = { -1, -1, -1, 0, -1 };
 
 // How to find the 1D index of (X,Y) in the pitched (i.e. coalescing memory access aligned) memory for the DTW path matrix
 // Doing it column major (to mentally match the dtwCostSoFar vertical swath 1D right edge indices), whereas convention is row major in most CUDA code.
@@ -87,7 +87,6 @@ __global__ void DTWDistance(T *second_seq_input, size_t second_seq_input_length,
 			if(pathMatrix != 0){
 				pathMatrix[pitchedCoord(offset_within_second_seq+i,0,pathMemPitch)] = use_open_start ? OPEN_RIGHT : RIGHT;
 			}
-
 		}
 		dtwCostSoFar[0] = costs[(i-1)+blockDim.x*((i-1)%3)];
 	}
@@ -121,7 +120,7 @@ __global__ void DTWDistance(T *second_seq_input, size_t second_seq_input_length,
 			}
 
 			// Use the White-Neely step pattern (a diagonal move is preferred to right-up or up-right if costs are equivalent).
-			if(use_open_end && i-threadIdx.x == first_seq_length-1){
+			if(use_open_end && i-threadIdx.x == first_seq_length-1 && (threadIdx.x != 0 || offset_within_second_seq != 0)){
 				// No extra cost to consume a sequence element from the first sequence, just copy it over from the previous column.
 				costs[threadIdx.x+blockDim.x*(i%3)] = costs[threadIdx.x+blockDim.x*((i-1)%3)];
 				if(pathMatrix != 0){
