@@ -10,19 +10,25 @@
 #include "cpu_utils.hpp"
 #include "dba.hpp"
 
+#define TEXT_READ_MODE 0
+#define BINARY_READ_MODE 1
+#define TSV_READ_MODE 2
+
 template<typename T>
 void
-setupAndRun(char **series_file_names, int num_series, char *output_prefix, int binary_read_mode, int use_open_start, int use_open_end, double convergence_delta){
+setupAndRun(char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, double convergence_delta){
 	size_t *sequence_lengths = 0;
 	size_t averageSequenceLength = 0;
 	void *averageSequence = 0;
 	T **sequences = 0;
-        if(binary_read_mode){ readSequenceBinaryFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
-        else{ readSequenceTextFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
+	int actual_num_series = 0; // excludes failed file reading
+        if(read_mode == BINARY_READ_MODE){ actual_num_series = readSequenceBinaryFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
+        else if(read_mode == TSV_READ_MODE){ actual_num_series = readSequenceTSVFiles<T>(series_file_names, num_series, &sequences, &series_file_names, &sequence_lengths); }
+        else{ actual_num_series = readSequenceTextFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
 
 	// Shorten sequence names to everything before the first "." in the file name
-	for (int i = 0; i < num_series; i++){ char *z = strchr(series_file_names[i], '.'); if(z) *z = '\0';}
-        performDBA<T>(sequences, num_series, sequence_lengths, series_file_names, convergence_delta, use_open_start, use_open_end, output_prefix, (T **) &averageSequence, &averageSequenceLength);
+	for (int i = 0; i < actual_num_series; i++){ char *z = strchr(series_file_names[i], '.'); if(z) *z = '\0';}
+        performDBA<T>(sequences, actual_num_series, sequence_lengths, series_file_names, convergence_delta, use_open_start, use_open_end, output_prefix, (T **) &averageSequence, &averageSequenceLength);
 
 	std::ofstream avg_file((std::string(output_prefix)+std::string(".avg.txt")).c_str());
 	if(!avg_file.is_open()){
@@ -42,13 +48,13 @@ setupAndRun(char **series_file_names, int num_series, char *output_prefix, int b
 __host__
 int main(int argc, char **argv){
 
-	if(argc < 8){
+	if(argc < 7){
 #if DOUBLE_UNSUPPORTED == 1
-		std::cout << "Usage: " << argv[0] << " <binary|text> <int|uint|ulong|float> " <<
+		std::cout << "Usage: " << argv[0] << " <binary|text|tsv> <int|uint|ulong|float> " <<
 #else
-		std::cout << "Usage: " << argv[0] << " <binary|text> <int|uint|ulong|float|double> " <<
+		std::cout << "Usage: " << argv[0] << " <binary|text|tsv> <int|uint|ulong|float|double> " <<
 #endif
-		          "<global|open_start|open_end|open> <output files prefix> <delta criterium for convergence, in range (0,1]> <series1.txt> <series2.txt> [series3.txt...]\n";
+		          "<global|open_start|open_end|open> <output files prefix> <delta criterium for convergence, in range (0,1]> <series.tsv|<series1> <series2> [series3...]>\n";
 		exit(1);
      	}
 
@@ -58,9 +64,12 @@ int main(int argc, char **argv){
 		std::cerr << "Fifth argument (" << argv[3] << ") could not be parsed into a number in the acceptable range (0,1]" << std::endl;
 		exit(1);
 	} 
-	int binary_read_mode = 0;
+	int read_mode = TEXT_READ_MODE;
 	if(!strcmp(argv[1],"binary")){
-		binary_read_mode = 1;
+		read_mode = BINARY_READ_MODE;
+	}
+	else if(!strcmp(argv[1],"tsv")){
+		read_mode = TSV_READ_MODE;
 	}
 	else if(strcmp(argv[1],"text")){
 		std::cerr << "First argument (" << argv[1] << ") is neither 'binary' nor 'text'" << std::endl;
@@ -91,22 +100,22 @@ int main(int argc, char **argv){
 	int argind = 6; // Where the file names start
 	// The following are all the data types supported by CUDA's atomicAdd() operation, so we support them too for best value precision maintenance.
 	if(!strcmp(argv[2],"int")){
-		setupAndRun<int>(&argv[argind], num_series, output_prefix, binary_read_mode, use_open_start, use_open_end, convergence_delta);
+		setupAndRun<int>(&argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, convergence_delta);
 	}
 	else if(!strcmp(argv[2],"uint")){
-		setupAndRun<unsigned int>(&argv[argind], num_series, output_prefix, binary_read_mode, use_open_start, use_open_end, convergence_delta);
+		setupAndRun<unsigned int>(&argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, convergence_delta);
 	}
 	else if(!strcmp(argv[2],"ulong")){
-		setupAndRun<unsigned long long>(&argv[argind], num_series, output_prefix, binary_read_mode, use_open_start, use_open_end, convergence_delta);
+		setupAndRun<unsigned long long>(&argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, convergence_delta);
 	}
 	else if(!strcmp(argv[2],"float")){
-		setupAndRun<float>(&argv[argind], num_series, output_prefix, binary_read_mode, use_open_start, use_open_end, convergence_delta);
+		setupAndRun<float>(&argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, convergence_delta);
 	}
 	// Only since CUDA 6.1 (Pascal and later architectures) is atomicAdd(double *...) supported.  Remove if you want to compile for earlier graphics cards.
 #if DOUBLE_UNSUPPORTED == 1
 #else
 	else if(!strcmp(argv[2],"double")){
-		setupAndRun<double>(&argv[argind], num_series, output_prefix, binary_read_mode, use_open_start, use_open_end, convergence_delta);
+		setupAndRun<double>(&argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, convergence_delta);
 	}
 #endif
 	else{
