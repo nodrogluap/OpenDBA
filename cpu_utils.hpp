@@ -153,7 +153,7 @@ read_tsv_data(const char *text_file_name, T **sequences, char **sequence_names, 
 template<typename T>
 int readSequenceTSVFiles(char **filenames, int num_files, T ***sequences, char ***sequence_names, size_t **sequence_lengths){
 
-	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? " TSV data file" : "TSV data files");
+	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? " TSV data file" : " TSV data files");
 
 	// Need two passes: 1st figure out how many sequences there are, then in the 2nd we read the sequences into memory.
 	size_t total_seq_count = 0;
@@ -172,7 +172,7 @@ int readSequenceTSVFiles(char **filenames, int num_files, T ***sequences, char *
         char spinner[4] = { '|', '/', '-', '\\'};
 	int actual_count = 0;
         for(int i = 0; i < num_files; ++i){
-                int newDotTotal = 100*((float) actual_count/(num_files-1));
+                int newDotTotal = 100*((float) i/(num_files-1));
                 if(newDotTotal > dotsPrinted){
                         for(; dotsPrinted < newDotTotal; dotsPrinted++){
                                 std::cerr << "\b.|";
@@ -190,7 +190,7 @@ int readSequenceTSVFiles(char **filenames, int num_files, T ***sequences, char *
 			actual_count += num_seqs_this_file;
 		}
         }
-	while(dotsPrinted++ < 100){std::cerr << ".";}
+	if(dotsPrinted < 100){while(dotsPrinted++ < 99){std::cerr << ".";} std::cerr << "|";}
 	std::cerr << std::endl;
 	return actual_count;
 }
@@ -201,7 +201,7 @@ int readSequenceTextFiles(char **filenames, int num_files, T ***sequences, size_
         cudaMallocHost(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating CPU memory for sequence lengths");
 
         int dotsPrinted = 0;
-	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? "text data file" : "text data files") << ", total sequence count " << num_files << std::endl;
+	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? " text data file" : " text data files") << ", total sequence count " << num_files << std::endl;
         std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
         char spinner[4] = { '|', '/', '-', '\\'};
 	int actual_count = 0;
@@ -223,7 +223,7 @@ int readSequenceTextFiles(char **filenames, int num_files, T ***sequences, size_
 			actual_count++;
 		}
         }
-	while(dotsPrinted++ < 100){std::cerr << ".";}
+	if(dotsPrinted < 100){while(dotsPrinted++ < 99){std::cerr << ".";} std::cerr << "|";}
 	std::cerr << std::endl;
 	return actual_count;
 }
@@ -234,7 +234,7 @@ int readSequenceBinaryFiles(char **filenames, int num_files, T ***sequences, siz
         cudaMallocHost(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating CPU memory for sequence lengths");
 
         int dotsPrinted = 0;
-	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? "binary data file" : "binary data files") << ", total sequence count " << num_files << std::endl;
+	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? " binary data file" : " binary data files") << ", total sequence count " << num_files << std::endl;
         std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
         char spinner[4] = { '|', '/', '-', '\\'};
 	int actual_count = 0;
@@ -256,7 +256,8 @@ int readSequenceBinaryFiles(char **filenames, int num_files, T ***sequences, siz
 			actual_count++;
 		}
         }
-	while(dotsPrinted++ < 100){std::cerr << ".";}
+	if(dotsPrinted < 100){while(dotsPrinted++ < 99){std::cerr << ".";} std::cerr << "|";}
+	std::cerr << std::endl;
 	return actual_count;
 }
 #endif
