@@ -49,7 +49,7 @@ R
 ```R
   tab <- read.table("foo.pair_dists.txt", sep="\t", row.names=1, header=FALSE)
   colnames(tab) <- rownames(tab)
-  dis <- as.dist(t(tab2), diag=TRUE)
+  dis <- as.dist(t(tab), diag=TRUE)
   hc <- hclust(dis)
   plot(hc)
 ```
