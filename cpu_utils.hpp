@@ -40,7 +40,7 @@ read_binary_data(const char *binary_file_name, T **output_vals, size_t *num_outp
     *num_output_vals = n/sizeof(T);
   }
   else{
-    std::cerr << "Error reading in file " << binary_file_name << " exiting" << std::endl;
+    std::cerr << "Error reading in file " << binary_file_name << ", skipping" << std::endl;
     return 1;
   }
 
@@ -65,7 +65,7 @@ read_text_data(const char *text_file_name, T **output_vals, size_t *num_output_v
   std::vector <char> read_buffer( SZ );
   std::ifstream ifs(text_file_name, std::ios::binary); // Don't bother translating EOL as we are counting only, so using binary mode (PC + *NIX) 
   if(!ifs){
-    std::cerr << "Error reading in file " << text_file_name << " exiting" << std::endl;
+    std::cerr << "Error reading in file " << text_file_name << ", skipping" << std::endl;
     return 1;
   }
   int n = 0;
@@ -74,7 +74,7 @@ read_text_data(const char *text_file_name, T **output_vals, size_t *num_output_v
   }
   *num_output_vals = n;
   if(n == 0){
-    std::cerr << "File is empty or not proparly formatted. Exiting." << std::endl;
+    std::cerr << "File " << text_file_name << " is empty or not properly formatted. Skipping." << std::endl;
     return 1;
   }
 
@@ -118,7 +118,9 @@ void readSequenceTextFiles(char **filenames, int num_files, T ***sequences, size
                         std::cerr << "\b" << spinner[i%4];
                 }
 
-                read_text_data<T>(filenames[i], (*sequences) + i, (*sequence_lengths) + i);
+                if(read_text_data<T>(filenames[i], (*sequences) + i, (*sequence_lengths) + i)){
+			i--;
+		}
         }
 	std::cerr << std::endl;
 }
@@ -143,7 +145,9 @@ void readSequenceBinaryFiles(char **filenames, int num_files, T ***sequences, si
                         std::cerr << "\b" << spinner[i%4];
                 }
 
-                read_binary_data<T>(filenames[i], (*sequences) + i, (*sequence_lengths) + i);
+                if(read_binary_data<T>(filenames[i], (*sequences) + i, (*sequence_lengths) + i)){
+			i--;
+		}
         }
 	std::cerr << std::endl;
 }
