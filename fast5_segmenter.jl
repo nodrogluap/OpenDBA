@@ -182,7 +182,7 @@ for argi=6:size(ARGS)[1]
 	# Commented lines represent option to print first pass segemtnation results to a file for plotting or debugging.
         # fileName = string(output_file_prefix, ".max", translocation_rate_per_second, "bps.event_means.txt");
         # io = open(fileName,"w");
-        fileName = string(output_file_prefix, ".max", translocation_rate_per_second, "bps.event_means2.txt");
+        fileName = string(output_file_prefix, ".max", translocation_rate_per_second, "bps.event_medians.txt");
         #io2 = open(fileName,"w");
         io = open(fileName,"w");
 
