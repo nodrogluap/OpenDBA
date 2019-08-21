@@ -58,7 +58,7 @@ R
 
 ## How do I use this for Oxford Nanopore data?
 
-Although DBA and this software are very broadly applicable to time series in various domains of study, one of the main motivations for developing an open end DBA implementation is the clustering and consensus analysis of direct RNA data from [Oxford Nanopore Technologies](https://nanoporetech.com/applications/rna-sequencing) devices. The raw 4000Hz picoamperage measurements are stored in a dialect of [HDF5](https://www.hdfgroup.org/solutions/hdf5/) files called FAST5. A [Julia](https://julialang.org/) script is provided in this repository to extract these data from FAST5 files, and perform two pass adaptive dynamic programming segmentation of the raw signal to reduce the 4000Hz signal to putative electrical current levels for each RMNA (or DNA) base translocated though the nanopore sensor.  The segmentation algorithm is computationally intensive and slow (a CUDA version is not quite ready for release yet), but minimizes the residual sum of squares for segmenting the specified raw event window, given some known upper limit on the translocation rate and the desire to ignore very short lived outlier measurements. It's a nanopore-signal-specific refinement of Justin Wilmert's [Bellman's K-segmentation implementation](http://homepages.spa.umn.edu/~willmert/science/ksegments/). 
+Although DBA and this software are very broadly applicable to time series in various domains of study, one of the main motivations for developing an open end DBA implementation is the clustering and consensus analysis of direct RNA data from [Oxford Nanopore Technologies](https://nanoporetech.com/applications/rna-sequencing) devices. The raw 4000Hz picoamperage measurements are stored in a dialect of [HDF5](https://www.hdfgroup.org/solutions/hdf5/) files called FAST5. A [Julia](https://julialang.org/) script is provided in this repository to extract these data from FAST5 files, and perform two pass adaptive dynamic programming segmentation of the raw signal to reduce the 4000Hz signal to putative electrical current levels for each RNA (or DNA) base translocated though the nanopore sensor.  The segmentation algorithm is computationally intensive and slow (a CUDA version is not quite ready for release yet), but minimizes the residual sum of squares for segmenting the specified raw event window, given some known upper limit on the translocation rate and the desire to ignore very short lived outlier measurements. It's a nanopore-signal-specific refinement of Justin Wilmert's [Bellman's K-segmentation implementation](http://homepages.spa.umn.edu/~willmert/science/ksegments/). 
 
 Install Julia 1.0+ using [conda](https://github.com/ucvm/synergy/wiki/Using-Conda), then run an interactive Julia interpreter to install the required packages. 
 
@@ -75,14 +75,14 @@ Pkg.add("Statistics");
 Pkg.add("StatsBase");
 ```
 
-Now you can run the segmentation script, for example for direct RNA the translocation rate is theoretically 70 bases per second (if there is plentiful ATP to fuel the motor protein, and no RNA secondary structures gumming up the racheting process), and the sensor picoamperage is measured at 4000Hz.  We will run a first pass segmentation (which accounts for wandering drift in the nanopore direct current) 400 raw samples at a time. This is fast. We will then do a second pass segentation on 3000 sample sat a time. This second pass is slower as 3000 samples can be segmented a low more ways than 400. You can set this to anything you want, the larger the more accurate, but obviously the larger the value the longer it takes.
+Now you can run the segmentation script, for example for direct RNA the translocation rate is theoretically 70 bases per second (if there is plentiful ATP to fuel the motor protein, and no RNA secondary structures gumming up the racheting process), and the sensor picoamperage is measured at 4000Hz.  We will run a first pass segmentation (which accounts for wandering drift in the nanopore direct current) 400 raw samples at a time. This is fast. We will then do a second pass segentation on 3000 sample sat a time. This second pass is slower as 3000 samples can be segmented a lot more ways than 400. You can set this to anything you want, the larger the more accurate, but obviously the larger the value the longer it takes.
 
 ```bash
 julia fast5_segmenter.jl 70 4000 400 3000 output_folder_name *.fast5
-openDBA text float open_end output_prefix 0.05 output_folder_name/*.event_means.txt
+openDBA text float open_end output_prefix 0.05 output_folder_name/*.event_medians.txt
 ```
 
-You can even do the alignmen on the raw 4000Hz signal if you wanted:
+You can even do the alignment on the raw 4000Hz signal if you wanted:
 
 ```bash
 openDBA text float open_end output_prefix 0.05 output_folder_name/*.raw.txt
