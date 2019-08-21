@@ -1,7 +1,7 @@
 # OpenDBA
 GPU-accelerated Dynamic Time Warp (DTW) Barycenter Averaging
 
-*tl;dr this code makes averaging multiple time series data at least 100x faster than existing CPU-based methods, and as a bonus generates a distance matrix, facilitating time series cluster analysis.*
+*tl;dr this code makes averaging multiple time series data at least 100x faster than existing CPU-based methods, and as a bonus generates a distance matrix, facilitating warped time series cluster analysis (e.g. white box analysis of nanopore direct RNA sequencing signals).*
 
 ## Compiling
 Requires CUDA Toolkit 7 or later: https://developer.nvidia.com/cuda-toolkit
