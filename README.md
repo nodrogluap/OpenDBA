@@ -39,7 +39,7 @@ DBA is the algorithm for optimal alignment of multiple numeric sequences to each
 
 1. The first and most expensive step of DBA is the identification of a "medoid" sequence with minimum [DTW](https://en.wikipedia.org/wiki/Dynamic_time_warping) residual sum of squares among all input sequences, which requires an all-vs-all DTW pair analysis. OpenDBA achieves up to 3 orders of magnitude speedup over the original DBA implementation by running the embarrasingly parallelizable all-vs-all DTW computations as CUDA (Nvidia GPU) kernels. A novel DTW alignment method is used that minimizes the GPU global device memory requirements of this parallel computation, by calculating each *full* DTW cost matrix in stages, by vertical swath in each threadblock's L1 cache (low latency), storing only the intermediate result at the right edge of each swath back to device global memory (high latency) before the next swath is computed. Thousands of sequences can be compared in minutes on GPUs with only a few GB of GPU RAM. If multiple GPUs are available on one machine they will be automatically used to scale the speedup almost linearly.
 
-2. Many DTW and DBA implementations speedup computation and reduce memory burden by restricting the DTW Cost Matrix calculation with an Itakura Parallogram or a Sakoe-Chiba band, which limits validity of the multiple alignment to sequences that are effectively the same end-to-end once small sequence compressions and attentuations (time warps) are considered. Because OpenDBA computes the full DTW cost matrix, unrestricted subsequence alignment is possible in the second sequence of the pair (i.e. incurring no penalty if the best alignment is not end-to-end in the pair's first sequence). In DTW parlance, these are special alignment states called "open start" and "open end". To our knowledge, this is the first implementation of DBA that allows open start and open end alignments, hence OpenDBA.
+2. Many DTW and DBA implementations speedup computation and reduce memory burden by restricting the DTW Cost Matrix calculation with an Itakura Parallogram or a Sakoe-Chiba band, which limits validity of the multiple alignment to sequences that are effectively the same end-to-end once small sequence compressions and attentuations (time warps) are considered. Because OpenDBA computes the full DTW cost matrix, unrestricted subsequence alignment is possible in the first sequence of the pair (i.e. incurring no penalty if the best alignment is not end-to-end in the pair's first sequence). In DTW parlance, these are special alignment states called "open start" and "open end". To our knowledge, this is the first implementation of DBA that allows open start and open end alignments, hence OpenDBA.
 
 3. The results of the initial all-vs-all DTW comparisons are stored to a distance matrix file (upper right format), so that it can be loaded into other software to do cluster analysis. For example, to perform complete linkage clustering and visualization of the time-warp corrected sequences (some series truncated, so open end mode required), using the R programming language:
 
@@ -75,10 +75,20 @@ Pkg.add("Statistics");
 Pkg.add("StatsBase");
 ```
 
-Now you can run the segmentation script, for example for direct RNA the translocation rate is theoretically 70 bases per second (if there is plentiful ATP to fuel the motor protein, and no RNA secondary structures gumming up the racheting process), and the sensor picoamperage is measured at 4000Hz.  We will run a first pass segmentation (which accounts for wandering drift in the nanopore direct current) 400 raw samples at a time. This is fast. We will then do a second pass segentation on 3000 sample sat a time. This second pass is slower as 3000 samples can be segmented a lot more ways than 400. You can set this to anything you want, the larger the more accurate, but obviously the larger the value the longer it takes.
+Now you can run the segmentation script, for example for direct RNA the translocation rate is theoretically 70 bases per second (if there is plentiful ATP to fuel the motor protein, and no RNA secondary structures gumming up the racheting process), and the sensor picoamperage is measured at 4000Hz.  We will run a first pass segmentation (which accounts for wandering drift in the nanopore direct current) 400 raw samples at a time. This is fast. We will then do a second pass segentation on 3000 sample sat a time. This second pass is slower as 3000 samples can be segmented a lot more ways than 400. You can set this to anything you want, the larger the more accurate, but obviously the larger the value the longer it takes and improvements are only marginal (nothing above 4000 is suggested for the second pass).
 
 ```bash
 julia fast5_segmenter.jl 70 4000 400 3000 output_folder_name *.fast5
+```
+The raw signal (black), first pass results (yellow), and second pass (read) results look something like this for one of the files processed as per above from a recent viral RNA run we did.
+
+![](docs/rhinoA_2_pass_segmentation.png)
+
+If you'd like to generate these types of images, uncomment the plotting code in ``fast5_segmenter.jl``. It's only been excluded because sometimes PyPlot can be a pain to install, and I want this code to be easy to install.
+
+Now we can do a multiple alignment of the signals using DBA to generate a consensus signal, and a distance matrix for cluster analysis like in the previouis sections.
+
+```bash
 openDBA text float open_end output_prefix 0.05 output_folder_name/*.event_medians.txt
 ```
 
@@ -87,3 +97,17 @@ You can even do the alignment on the raw 4000Hz signal if you wanted:
 ```bash
 openDBA text float open_end output_prefix 0.05 output_folder_name/*.raw.txt
 ```
+
+Below is an example of three nanopore picoamperage signals for a viral RNA sequence (i.e. three partial copies of the virus genome going through different sensors on the device at different times). By using an open-end DTW alignment, the fact that genome fragments are of different length *and information content at the end* does not adversely affect the consensus building. The time dimension compressions and dilations (i.e. time warp due to variation in the motor protein ratcheting rate) within the shared signal section are obvious when you mentally align large peaks and valley in the middle of the graphs.
+
+![Globally time scaled nanopore direct RNA picoamperage signals for a virus](docs/rhinoA_3_samples_global_scaling.png)
+
+The pairwise alignment of the first and third sequences shows that they are actually nearly identical after dynamic time warping is performed (note that the sequences have been reversed, purely for practicality in processing the DTW algo backtracking output).
+
+![Dynamic Time Warping alignment of two virus signals](docs/rhinoA_two_sample_dtw.png)
+
+The second sequence is considerably longer (and has more real underlying information at the end), but in our implementation these extra value are ignored in the consensus building, as the DBA algorithm by definition reults in a sequence the length of the medoid (in our case, the 3rd sequence). If we did not ignore the extra information in the longer sequence, the DTW would start doing ugly stuff, like deciding to not align the sequences at all and find the lowest cost by just going on the very edge of the cost matrix, like so:
+
+![DTW alignment with open end but longer sequence than centroid causing ugly DTW cost matrix edge travesal](docs/rhinoA_dtw_2_signals_one_with_more_info_but_open_end_data_not_ignored.png)
+
+This is mitigated in the OpenDBA software by reversing the open end step option to the centroid if the input sequence is longer than it.
