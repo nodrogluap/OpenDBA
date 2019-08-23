@@ -19,6 +19,8 @@ make DOUBLE_UNSUPPORTED=1
 ```
 
 ## Quick Start
+First, make sure you have an NVIDIA GPU in your computer.
+
 If you have up to thousands of text files with one number per line, generate (1) a sequence distance matrix and (2) a consensus sequence using the following command:
 
 ```bash
