@@ -124,3 +124,7 @@ The second sequence is considerably longer (and has more real underlying informa
 This is mitigated in the OpenDBA software by reversing the open end step option to the centroid if the input sequence is longer than it. As an example, the no-cost extension of the alignment between the longer black sequence (which I've truncated for visualization purposes) and the red medoid is shown in blue below, improving the overall alignment by anchoring the end of the "real" cost matrix 100 values in.  
 
 ![Close up of DTW alignment with open end on centroid/medoid rather than sequence yields reasonable alignment](docs/rhinoA_dtw_2_signals_one_with_more_info_open_end_data_ignored_closeup.png)
+
+The consensus for 3 raw sequences starts to smooth out the signal (less vertical "fat"), allowing us to look at fundamental properties of molecules like dwell time bias, irreducible noise, transition effects, etc. without a reference bias or including only signals that were well interpreted by a neural network basecaller.  On an RTX 2080 Ti GPU, consensus was calculated in 1 minute and 34 seconds, whereas the Java DBA implementation took 47 minutes. Due to the inherent parallelism of OpenDBA, consensus of sets of hundreds of sequences take only marginally longer than for 3 sequences.
+
+![Centroid consensus for the three raw nanopore virus direct RNA sequences used in the previous graphs](docs/rhinoA_3seq_raw_signal_dba.png)
