@@ -2,6 +2,7 @@ PROGNAME=openDBA
 CXX=nvcc
 # By default enable double precisuion float point number support (most NVIDIA GPU cards after 2016)
 DOUBLE_UNSUPPORTED=0
+DEBUG=0
 # For kernel-side sqrt() support
 NVCC_FLAGS+= --expt-relaxed-constexpr
 
