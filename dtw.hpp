@@ -39,34 +39,33 @@ __device__ T* shared_memory_proxy()
  * Compute the distance between a given pair of sequences along every White-Neely step pattern option, for the given vertical swath of the cost matrix.
  */
 template<typename T>
-__global__ void DTWDistance(T *second_seq_input, size_t second_seq_input_length, size_t first_seq_index, size_t offset_within_second_seq, T *gpu_sequences, size_t maxSeqLength, size_t num_sequences, size_t *gpu_sequence_lengths, 
-                       T *dtwCostSoFar, unsigned char *pathMatrix, size_t pathMemPitch, T *dtwPairwiseDistances, int use_open_start, int use_open_end){
+__global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_input_length, const T *second_seq_input, const size_t second_seq_input_length, const size_t first_seq_index, 
+                            const size_t offset_within_second_seq, const T *gpu_sequences, const size_t maxSeqLength, const size_t num_sequences, const size_t *gpu_sequence_lengths, 
+                            T *dtwCostSoFar, unsigned char *pathMatrix, const size_t pathMemPitch, T *dtwPairwiseDistances, const int use_open_start, const int use_open_end){
 	// We need temporary storage for three rows of the cost matrix to calculate the optimal path steps as a diagonal "wavefront" until we iterate 
 	// through every position of the first sequence.
 	T *costs = shared_memory_proxy<T>();
 
 	// Which two are we comparing in this threadblock?
-	//int second_seq_index = second_seq_input ? 0 : first_seq_index+blockIdx.x+1;
-	
 	// See if there is anything to process in this thread block 
-	size_t second_seq_length = second_seq_input ? second_seq_input_length : gpu_sequence_lengths[first_seq_index+blockIdx.x+1];
+	const size_t second_seq_length = second_seq_input ? second_seq_input_length : gpu_sequence_lengths[first_seq_index+blockIdx.x+1];
 	if(offset_within_second_seq >= second_seq_length){
 		return; // all threads in the threadblock will return
 	}
 
-	// Point to the correct spot in global memory where the costs are being stored.
-	dtwCostSoFar = &dtwCostSoFar[gpu_sequence_lengths[first_seq_index]*blockIdx.x];
+	const size_t first_seq_length = first_seq_input ? first_seq_input_length : gpu_sequence_lengths[first_seq_index];
+	const T *first_seq = first_seq_input ? first_seq_input : &gpu_sequences[first_seq_index*maxSeqLength];
+	const T *second_seq = second_seq_input ? second_seq_input : &gpu_sequences[(first_seq_index+blockIdx.x+1)*maxSeqLength];
 
-	size_t first_seq_length = gpu_sequence_lengths[first_seq_index];
-	T *first_seq = &gpu_sequences[first_seq_index*maxSeqLength];
-	T *second_seq = second_seq_input ? second_seq_input : &gpu_sequences[(first_seq_index+blockIdx.x+1)*maxSeqLength];
+	// Point to the correct spot in global memory where the costs are being stored.
+	dtwCostSoFar = &dtwCostSoFar[first_seq_length*blockIdx.x];
 
 	// Each thread will be using the same second sequence value throughout the rest of the kernel, so store it as a local variable for efficiency.
-	T second_seq_thread_val = offset_within_second_seq+threadIdx.x >= second_seq_length ? 0 : second_seq[offset_within_second_seq+threadIdx.x];
+	const T second_seq_thread_val = offset_within_second_seq+threadIdx.x >= second_seq_length ? 0 : second_seq[offset_within_second_seq+threadIdx.x];
 
 	if(threadIdx.x == 0){
 		// Populate the bottom row of the vertical swath on every kernel invocation, this can't be done in parallel.
-		T first_seq_start_val = first_seq[0];
+		const T first_seq_start_val = first_seq[0];
 		if(offset_within_second_seq == 0){
 			costs[0] = 0;
 			if(pathMatrix != 0){
@@ -96,10 +95,10 @@ __global__ void DTWDistance(T *second_seq_input, size_t second_seq_input_length,
 		if(offset_within_second_seq+threadIdx.x < second_seq_length && // We're within the sequence bounds?
 		   threadIdx.x < i &&                                          // The diff still corresponds to a spot in the cost matrix?
 		   i-threadIdx.x < first_seq_length){
-			T up_cost = numeric_limits<T>::max();
-			T diag_cost = numeric_limits<T>::max();
-			T right_cost = numeric_limits<T>::max();
-			T diff = first_seq[i-threadIdx.x]-second_seq_thread_val;
+			volatile T up_cost = numeric_limits<T>::max();
+			volatile T diag_cost = numeric_limits<T>::max();
+			volatile T right_cost = numeric_limits<T>::max();
+			volatile T diff = first_seq[i-threadIdx.x]-second_seq_thread_val;
 
 			// The left edge of cost matrix vertical swath is a special case as we need to 
 			// access previously global mem stored intermediate costs.
@@ -126,7 +125,7 @@ __global__ void DTWDistance(T *second_seq_input, size_t second_seq_input_length,
 				right_cost = costs[(threadIdx.x-1)+blockDim.x*((i-1)%3)];
 				used_open_right_end_cost = 1;
 			}
-			else if(diag_cost > up_cost){
+			if(diag_cost > up_cost){
 				if(up_cost > right_cost){
 					costs[threadIdx.x+blockDim.x*(i%3)] = right_cost;
 					if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = used_open_right_end_cost ? OPEN_RIGHT : RIGHT;}
