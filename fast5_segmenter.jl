@@ -160,19 +160,19 @@ function regress_ksegments(series::Array{Int16,1}, weights::Array{Float64,1}, k:
 end
 
 translocation_rate_per_second = parse(Int64, ARGS[1]);
-sampling_frequency = parse(Int64, ARGS[2]);
-max_samples_to_segment = parse(Int64, ARGS[3]);
-max_samples_to_supersegment = parse(Int64, ARGS[4]);
-output_prefix = ARGS[5];
+max_samples_to_segment = parse(Int64, ARGS[2]);
+max_samples_to_supersegment = parse(Int64, ARGS[3]);
+output_prefix = ARGS[4];
 
 avg_segment_size = 1000/translocation_rate_per_second; # in ms
-#println("Average expected segment size was ", avg_segment_size);
+#println("Average expected segment duration is ", avg_segment_size, "ms");
 
 # read the fast5 file name from the command line
-for argi=6:size(ARGS)[1]
+for argi=5:size(ARGS)[1]
     fast5 = h5open(ARGS[argi], "r");
     channel = fast5["UniqueGlobalKey/channel_id"];
     channel_number = read(attrs(channel), "channel_number");
+    sampling_frequency = read(attrs(channel), "sampling_rate");
     for nanopore_read in fast5["/Raw/Reads"]
         whole_raw_signal = read(nanopore_read, "Signal");
         read_number = read(attrs(nanopore_read), "read_number");
