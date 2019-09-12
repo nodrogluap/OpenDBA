@@ -120,7 +120,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 
 			// Use the White-Neely step pattern (a diagonal move is preferred to right-up or up-right if costs are equivalent).
 			int used_open_right_end_cost = 0;
-			if(use_open_end && i-threadIdx.x == first_seq_length-1 && (threadIdx.x != 0 || offset_within_second_seq != 0)){
+			if(use_open_end && i-threadIdx.x == first_seq_length-1 && threadIdx.x != 0){
 				// No extra cost to consume a sequence element from the first sequence, just copy it over from the previous column.
 				right_cost = costs[(threadIdx.x-1)+blockDim.x*((i-1)%3)];
 				used_open_right_end_cost = 1;
