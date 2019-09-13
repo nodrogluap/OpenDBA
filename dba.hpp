@@ -121,7 +121,7 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 		}
 		T *dtwCostSoFar = 0;
 		T *cpu_dtwCostSoFar = 0;
-		cudaMalloc(&dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values");
+		cudaMallocManaged(&dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values");
 		cudaMallocHost(&cpu_dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating CPU memory for DTW pairwise distance intermediate values");
 
 		// Make calls to DTWDistance serial within each seq, but allow multiple seqs on the GPU at once.
@@ -271,7 +271,7 @@ template<typename T>
 __host__ double 
 DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t num_sequences, size_t *sequence_lengths, size_t *gpu_sequence_lengths, int use_open_start, int use_open_end, T *updatedMean, cudaStream_t stream) {
 	T *gpu_centroidAlignmentSums;
-	cudaMalloc(&gpu_centroidAlignmentSums, sizeof(T)*centerLength); CUERR("Allocating GPU memory for barycenter update sequence element sums");
+	cudaMallocManaged(&gpu_centroidAlignmentSums, sizeof(T)*centerLength); CUERR("Allocating GPU memory for barycenter update sequence element sums");
 	cudaMemset(gpu_centroidAlignmentSums, 0, sizeof(T)*centerLength); CUERR("Initialzing GPU memory for barycenter update sequence element sums to zero");
 
 	T *cpu_centroid;
@@ -285,7 +285,7 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
         unsigned int maxThreads = deviceProp.maxThreadsPerBlock;
 
 	unsigned int *nElementsForMean, *cpu_nElementsForMean;
-	cudaMalloc(&nElementsForMean, sizeof(unsigned int)*centerLength); CUERR("Allocating GPU memory for barycenter update sequence pileup");
+	cudaMallocManaged(&nElementsForMean, sizeof(unsigned int)*centerLength); CUERR("Allocating GPU memory for barycenter update sequence pileup");
 	cudaMemset(nElementsForMean, 0, sizeof(unsigned int)*centerLength); CUERR("Initialzing GPU memory for barycenter update sequence pileup to zero");
 	cudaMallocHost(&cpu_nElementsForMean, sizeof(unsigned int)*centerLength); CUERR("Allocating CPU memory for barycenter sequence pileup");
 
@@ -331,7 +331,7 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
                 }
 
 		T *dtwCostSoFar = 0;
-                cudaMalloc(&dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values");
+                cudaMallocManaged(&dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values");
 
 		// Under the assumption that long sequences have the same or more information than the centroid, flip the DTW comparison so the centroid has an open end.
 		// Otherwise you're cramming extra sequence data into the wrong spot and the DTW will give up and choose an all-up then all-open right path instead of a diagonal,
@@ -498,7 +498,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	cudaMallocHost(&gpu_sequence_lengths, sizeof(size_t **)*deviceCount); CUERR("Allocating GPU memory for array of sequence lengths");
 	for(int currDevice = 0; currDevice < deviceCount; currDevice++){
 		cudaSetDevice(currDevice);
-		cudaMalloc(&gpu_sequence_lengths[currDevice], sizeof(size_t)*num_sequences); CUERR("Allocating GPU memory for array of sequence length pointers");
+		cudaMallocManaged(&gpu_sequence_lengths[currDevice], sizeof(size_t)*num_sequences); CUERR("Allocating GPU memory for array of sequence length pointers");
         	cudaMemcpyAsync(gpu_sequence_lengths[currDevice], sequence_lengths, sizeof(size_t)*num_sequences, cudaMemcpyHostToDevice, stream); CUERR("Copying sequence lengths to GPU memory");
 	}
 
@@ -506,7 +506,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	cudaMallocHost(&gpu_sequences, sizeof(T**)*deviceCount); CUERR("Allocating GPU memory for array of sequences");
         for(int currDevice = 0; currDevice < deviceCount; currDevice++){
 		cudaSetDevice(currDevice);
-		cudaMalloc(&gpu_sequences[currDevice], sizeof(T)*num_sequences*maxLength); CUERR("Allocating GPU memory for array of sequences");
+		cudaMallocManaged(&gpu_sequences[currDevice], sizeof(T)*num_sequences*maxLength); CUERR("Allocating GPU memory for array of sequences");
 		// Make a GPU copy of the input ragged 2D array as an evenly spaced 1D array for performance
 		for (int i = 0; i < num_sequences; i++) {
         		cudaMemcpyAsync(gpu_sequences[currDevice]+i*maxLength, sequences[i], sequence_lengths[i]*sizeof(T), cudaMemcpyHostToDevice, stream); CUERR("Copying sequence to GPU memory");
@@ -523,7 +523,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	std::cerr << std::endl << "Initial medoid " << sequence_names[medoidIndex] << " has length " << medoidLength << std::endl;
 	T *gpu_barycenter = 0;
 	cudaSetDevice(0);
-	cudaMalloc(&gpu_barycenter, sizeof(T)*medoidLength); CUERR("Allocating GPU memory for DBA result");
+	cudaMallocManaged(&gpu_barycenter, sizeof(T)*medoidLength); CUERR("Allocating GPU memory for DBA result");
         cudaMemcpyAsync(gpu_barycenter, gpu_sequences[0]+maxLength*medoidIndex, medoidLength*sizeof(T), cudaMemcpyDeviceToDevice, stream);  CUERR("Copying medoid seed to GPU memory");
 
 	// Z-normalize the sequences in parallel on the GPU, once all the async memcpy calls are done.
