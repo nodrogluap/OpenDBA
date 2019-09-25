@@ -91,19 +91,19 @@ Now you can run the segmentation script, for example for direct RNA the transloc
 ```bash
 julia fast5_segmenter.jl 70 400 3000 output_folder_name *.fast5
 ```
-The raw signal (black), first pass results (yellow), and second pass (read) results look something like this for one of the files processed as per above from a recent viral RNA run we did.
+The raw signal (black), first pass results (yellow), and second pass (red) results look something like this for one of the files processed as per above from a recent viral RNA run we did.
 
 ![Raw nanopore signal segmented in two rounds](docs/rhinoA_2_pass_segmentation.png)
 
 If you'd like to generate these types of images, uncomment the plotting code in ``fast5_segmenter.jl``. It's only been excluded because sometimes PyPlot can be a pain to install, and I want this code to be easy to install.
 
-Now we can do a multiple alignment of the signals using DBA to generate a consensus signal, and a distance matrix for cluster analysis like in the previouis sections.
+Now we can do a multiple alignment of the signals using DBA to generate a consensus signal, and a distance matrix for cluster analysis like in the previous sections.
 
 ```bash
 openDBA text float open_end output_prefix 0.05 output_folder_name/*.event_medians.txt
 ```
 
-You can even do the alignment on the raw 4000Hz signal if you wanted:
+You can even do the alignment on the raw signal if you wanted:
 
 ```bash
 openDBA text float open_end output_prefix 0.05 output_folder_name/*.raw.txt
@@ -117,7 +117,7 @@ The pairwise alignment of the first and third sequences shows that they are actu
 
 ![Dynamic Time Warping alignment of two virus signals](docs/rhinoA_two_sample_dtw.png)
 
-The second sequence is considerably longer (and has more real underlying information at the end), but in our implementation these extra value are ignored in the consensus building, as the DBA algorithm by definition reults in a sequence the length of the medoid (in our case, the 3rd sequence). If we did not ignore the extra information in the longer sequence, the DTW would start doing ugly stuff, like deciding to not align the sequences at all and find the lowest cost by just going on the very edge of the cost matrix, like so:
+The second sequence is considerably longer (and has more real underlying information at the end), but in our implementation these extra value are ignored in the consensus building, as the DBA algorithm by definition results in a sequence the length of the medoid (in our case, the 3rd sequence). If we did not ignore the extra information in the longer sequence, the DTW would start doing ugly stuff, like deciding to not align the sequences at all and find the lowest cost by just going on the very edge of the cost matrix, a so-called "pathological alignment":
 
 ![DTW alignment with open end but longer sequence than centroid causing ugly DTW cost matrix edge travesal](docs/rhinoA_dtw_2_signals_one_with_more_info_but_open_end_data_not_ignored.png)
 
