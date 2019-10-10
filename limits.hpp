@@ -1,6 +1,11 @@
 #ifndef __CUDA_LIMITS_HPP
 #define __CUDA_LIMITS_HPP
 
+#if defined(_WIN32)
+	typedef unsigned short ushort;
+	typedef unsigned int uint;
+#endif
+
 #include <limits.h>
 
 namespace cudahack {

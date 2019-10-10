@@ -16,5 +16,8 @@ endif
 
 all: $(PROGNAME)
 
+multithreading.o: multithreading.cpp
+	nvcc -c -o multithreading.o multithreading.cpp
+
 $(PROGNAME): Makefile openDBA.cu multithreading.o cpu_utils.hpp gpu_utils.hpp io_utils.hpp exit_codes.hpp dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
 	nvcc -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) $(NVCC_FLAGS) openDBA.cu multithreading.o -o $(PROGNAME)
