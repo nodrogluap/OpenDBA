@@ -39,6 +39,7 @@ CUT_THREADPROC dtwStreamCleanup(void *void_arg){
 		cudaFree(workload->pathMatrix_memptr); CUERR("Freeing DTW path matrix");
 	}
 	cudaStreamDestroy(workload->stream); CUERR("Removing a CUDA stream after completion");
+	cudaFreeHost(workload); CUERR("Freeing host memory for dtwStreamCleanup");
 
 	CUT_THREADEND;
 }
@@ -147,6 +148,7 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 		cleanup_workload->stream = seq_stream;
 		cudaStreamAddCallback(seq_stream, dtwStreamCleanupLaunch, cleanup_workload, 0);
 	}
+        cudaFreeHost(maxThreads);
 	// TODO: use a fancy cleanup thread barrier here so that multiple DBAs could be running on the same device and not interfere with each other at this step.
 	for(int i = 0; i < deviceCount; i++){
                 cudaSetDevice(i);
