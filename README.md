@@ -24,7 +24,7 @@ First, make sure you have an NVIDIA GPU in your computer.
 If you have up to thousands of text files with one number per line, generate (1) a sequence distance matrix and (2) a consensus sequence using the following command:
 
 ```bash
-openDBA text float global output_prefix 0.05 input_numeric_series*.txt
+openDBA text float global output_prefix 0.05 /dev/null input_numeric_series*.txt
 ```
 Outputs are in `output_prefix.pair_dists.txt` and `output_prefix.avg.txt`. See all command line options by running the program without any arguments.
 
@@ -50,7 +50,7 @@ In this way, thousands of sequence pair cost matrices be compared in parallel in
 3. The results of the initial all-vs-all DTW comparisons are stored to a distance matrix file (upper right format), so that it can be loaded into other software to do cluster analysis. For example, to perform complete linkage clustering and visualization of the time-warp corrected sequences (some series truncated, so open end mode required), using the R programming language:
 
 ```bash
-openDBA text float open_end foo 0.05 numeric_series*.txt
+openDBA text float open_end foo 0.05 /dev/null numeric_series*.txt
 R
 ```
 
@@ -100,13 +100,13 @@ If you'd like to generate these types of images, uncomment the plotting code in 
 Now we can do a multiple alignment of the signals using DBA to generate a consensus signal, and a distance matrix for cluster analysis like in the previous sections.
 
 ```bash
-openDBA text float open_end output_prefix 0.05 output_folder_name/*.event_medians.txt
+openDBA text float open_end output_prefix 0.05 /dev/null output_folder_name/*.event_medians.txt
 ```
 
 You can even do the alignment on the raw signal if you wanted:
 
 ```bash
-openDBA text float open_end output_prefix 0.05 output_folder_name/*.raw.txt
+openDBA text float open_end output_prefix 0.05 /dev/null output_folder_name/*.raw.txt
 ```
 
 Below is an example of three nanopore picoamperage signals for a viral RNA sequence (i.e. three partial copies of the virus genome going through different sensors on the device at different times). By using an open-end DTW alignment, the fact that genome fragments are of different length *and information content at the end* does not adversely affect the consensus building. The time dimension compressions and dilations (i.e. time warp due to variation in the motor protein ratcheting rate) within the shared signal section are obvious when you mentally align large peaks and valley in the middle of the graphs.
@@ -128,3 +128,9 @@ This is mitigated in the OpenDBA software by reversing the open end step option 
 The consensus for 3 raw sequences starts to smooth out the signal (less vertical "fat"), allowing us to look at fundamental properties of molecules like dwell time bias, irreducible noise, transition effects, etc. without a reference bias or including only signals that were well interpreted by a neural network basecaller.  On an RTX 2080 Ti GPU, consensus was calculated in 1 minute and 34 seconds, whereas the Java DBA implementation took 47 minutes. Due to the inherent parallelism of OpenDBA, consensus of sets of hundreds of sequences take only marginally longer than for 3 sequences.
 
 ![Centroid consensus for the three raw nanopore virus direct RNA sequences used in the previous graphs](docs/rhinoA_3seq_raw_signal_dba.png)
+
+If you've gotten this far, you may be wondering what the /dev/null argument has been in all the commands run to so far.  This argument is the name of a file to be used as a sequence prefix mask.  For example, if you are clustering Oxford Nanopore Technologies direct RNA sequencing data, every sequence will have roughly the same data generated in the first few seconds because the sequencing adapter is the same for every data series.  To perform clustering of the input series ONLY on the data after the common adapter, the common sequence prefix can be chopped by giving a file name with the prefix consensus (rather than /dev/null which indicates no desire to chop sequence prefixes).  For example, the raw signal consensus for direct RNA is included in this repository as ``direct_rna_leader_float.txt``:
+
+```bash
+openDBA text float open_end rtest 0.05 direct_rna_leader_float.txt rhinoA58/ch*.raw.txt
+```
