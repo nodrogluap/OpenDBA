@@ -446,7 +446,6 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 		//std::cout << t << "\t" << updatedMean[t] << "\t" << cpu_nElementsForMean[t] << std::endl;
 		updatedMean[t] /= cpu_nElementsForMean[t];
 	}
-        cudaStreamDestroy(stream);
 	cudaFree(gpu_centroidAlignmentSums); CUERR("Freeing GPU memory for the barycenter update sequence element sums");
 	cudaFree(nElementsForMean); CUERR("Freeing GPU memory for the barycenter update sequence pileup");
 	cudaFreeHost(cpu_nElementsForMean);  CUERR("Freeing CPU memory for the barycenter update sequence pileup");
