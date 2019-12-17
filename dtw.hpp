@@ -16,21 +16,18 @@ using namespace cudahack; // for device side numeric_limits
 #define NIL_OPEN_RIGHT 254 
 
 // For two series I & J, encode that the cost matrix DTW path (i,j) backtracking index decrement options for the DTW steps declared above are:
-// DIAGONAL => (-1,-1), RIGHT => (0,-1), UP => (-1,0), OPEN_RIGHT => (0,-1)
+// unset (0) => (-1, -1), DIAGONAL => (-1,-1), RIGHT => (0,-1), UP => (-1,0), OPEN_RIGHT => (0,-1)
 __device__ __constant__ short moveI[] = { -1, -1, 0, -1, 0 };
 __device__ __constant__ short moveJ[] = { -1, -1, -1, 0, -1 };
 
 // How to find the 1D index of (X,Y) in the pitched (i.e. coalescing memory access aligned) memory for the DTW path matrix
-// Doing it column major (to mentally match the dtwCostSoFar vertical swath 1D right edge indices), whereas convention is row major in most CUDA code.
 #define pitchedCoord(Column,Row,mem_pitch) ((size_t) ((Row)*(mem_pitch))+(Column))
 
 #define ARITH_SERIES_SUM(n) (((n)*(n+1))/2)
 
 // Need this because you cannot template dynamically allocated kernel memory in CUDA, as per https://stackoverflow.com/questions/27570552/templated-cuda-kernel-with-dynamic-shared-memory
 template <typename T>
-__device__ T* shared_memory_proxy()
-{
-    // do we need an __align__() here? I don't think so...
+__device__ T* shared_memory_proxy() {
     extern __shared__ unsigned char memory[];
     return reinterpret_cast<T*>(memory);
 }
@@ -102,13 +99,21 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 
 			// The left edge of cost matrix vertical swath is a special case as we need to 
 			// access previously global mem stored intermediate costs.
+			int used_open_right_end_cost = 0;
 			if(threadIdx.x == 0){
 				// Straight up is always an option
 				up_cost = costs[blockDim.x*((i-1)%3)] + diff*diff;
 				if(offset_within_second_seq != 0){
 					// All three steps are possible, two drawn from previous intermediate results
-					right_cost = dtwCostSoFar[i] + diff*diff;
-					diag_cost = dtwCostSoFar[i-1] + diff*diff;
+					right_cost = dtwCostSoFar[i];
+					diag_cost = dtwCostSoFar[i-1];
+					if(i-threadIdx.x < first_seq_length-1 || !use_open_end){
+						right_cost += diff*diff;
+						diag_cost += diff*diff;
+					}
+					else{
+						used_open_right_end_cost = 1;
+					}
 				}
 			}
 			// For all other threads all the input data is stored locally in costs[].
@@ -119,7 +124,6 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 			}
 
 			// Use the White-Neely step pattern (a diagonal move is preferred to right-up or up-right if costs are equivalent).
-			int used_open_right_end_cost = 0;
 			if(use_open_end && i-threadIdx.x == first_seq_length-1 && threadIdx.x != 0){
 				// No extra cost to consume a sequence element from the first sequence, just copy it over from the previous column.
 				right_cost = costs[(threadIdx.x-1)+blockDim.x*((i-1)%3)];
