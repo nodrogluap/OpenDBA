@@ -12,24 +12,30 @@
 // Text progress bar UI element
 static char spinner[] = { '|', '/', '-', '\\'};
 
-template <typename T>
 __host__
-int writeDTWPathMatrix(unsigned char *um_pathMatrix, char *filename, size_t num_rows, size_t num_columns, size_t pathPitch){
+int writeDTWPathMatrix(unsigned char *um_pathMatrix, const char *filename, size_t num_columns, size_t num_rows, size_t pathPitch){
+
 	unsigned char *cpu_pathMatrix = 0;
-        cudaMallocHost(&cpu_pathMatrix, sizeof(unsigned char)*pathPitch*(num_rows));
+        cudaMallocHost(&cpu_pathMatrix, sizeof(unsigned char)*pathPitch*(num_rows)); CUERR("Allocating CPU memory for path matrix");
 	// Copy the data from unified memory (could be GPU or CPU)
-        cudaMemcpy(cpu_pathMatrix, um_pathMatrix, sizeof(unsigned char)*pathPitch*(num_rows), cudaMemcpyDeviceToHost);
+        cudaMemcpy(cpu_pathMatrix, um_pathMatrix, sizeof(unsigned char)*pathPitch*(num_rows), cudaMemcpyDeviceToHost);  CUERR("Copying GPU to CPU memory for path matrix");
 
 	std::ofstream out(filename);
+        if(!out.is_open()){
+                std::cerr << "Cannot write to " << filename << std::endl;
+                return CANNOT_WRITE_DTW_PATH_MATRIX;
+        }
+
 	for(int i = 0; i < num_rows; i++){
 	        for(int j = 0; j < num_columns; j++){
-	                char move = cpu_pathMatrix[pitchedCoord(j,i,pathPitch)];
+	                unsigned char move = cpu_pathMatrix[pitchedCoord(j,i,pathPitch)];
 	                out << (move == DIAGONAL ? "D" : (move == RIGHT ? "R" : (move == UP ? "U" : (move == OPEN_RIGHT ?  "O" : (move == NIL || move == NIL_OPEN_RIGHT ? "N" : "?")))));
 	        }
 	        out << std::endl;
 	}
 	out.close();
 	cudaFreeHost(cpu_pathMatrix);
+	return 0;
 }
 
 template <typename T>
