@@ -9,6 +9,7 @@
 #include <fstream>
 #include "cpu_utils.hpp"
 #include "dba.hpp"
+#include "segmentation.hpp"
 
 #define TEXT_READ_MODE 0
 #define BINARY_READ_MODE 1
