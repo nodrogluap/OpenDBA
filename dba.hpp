@@ -7,7 +7,14 @@
 #include <iostream>
 #include <fstream>
 #include <string>
-#include <unistd.h>
+#if defined(_WIN32)
+	#include <Windows.h>
+	extern "C"{
+		#include "getopt.h"
+	}
+#else
+	#include <unistd.h>
+#endif
 
 #include "multithreading.h"
 #include "exit_codes.hpp"
@@ -109,7 +116,11 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 		cudaMemGetInfo(&freeGPUMem, &totalGPUMem);	
 		while(freeGPUMem < dtwCostSoFarSize){
 			//std::this_thread::sleep_for(std::chrono::seconds(1));
-			usleep(1000);
+			#ifdef _WIN32
+				Sleep(1);
+			#else
+				usleep(1000);
+			#endif
 			//std::cerr << "Waiting for memory to be freed before launching " << std::endl;
 			cudaMemGetInfo(&freeGPUMem, &totalGPUMem);
 		}
@@ -319,7 +330,11 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 		}
                 cudaMemGetInfo(&freeGPUMem, &totalGPUMem);
                 while(freeGPUMem < dtwCostSoFarSize+pathMatrixSize*1.05){ // assume pitching could add up to 5%
-                        usleep(1000);
+                        #ifdef _WIN32
+							Sleep(1);
+						#else
+							usleep(1000);
+						#endif
                         //std::cerr << "Waiting for memory to be freed before launching " << std::endl;
                         cudaMemGetInfo(&freeGPUMem, &totalGPUMem);
                 }

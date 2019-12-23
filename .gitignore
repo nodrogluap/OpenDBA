@@ -1,0 +1,14 @@
+# Object files
+*.o
+*.so
+*.obj
+
+# Executables
+*.exe
+*.out
+
+# lib files
+*.lib
+
+# exp files
+*.exp
