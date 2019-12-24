@@ -15,7 +15,7 @@
 #define BINARY_READ_MODE 1
 #define TSV_READ_MODE 2
 #if HDF5_SUPPORTED == 1
-#define HDF5_READ_MODE 3
+#define FAST5_READ_MODE 3
 #endif
 
 template<typename T>
@@ -30,7 +30,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	// In the following two the sequence names are from inside the file, not the file names themselves
         else if(read_mode == TSV_READ_MODE){ actual_num_series = readSequenceTSVFiles<T>(series_file_names, num_series, &sequences, &series_file_names, &sequence_lengths); }
 #if HDF5_SUPPORTED == 1
-        else if(read_mode == FAST5_READ_MODE){ actual_num_series = readSequenceHDF5Files<T>(series_file_names, num_series, &sequences, &series_file_names, &sequence_lengths); }
+        else if(read_mode == FAST5_READ_MODE){ actual_num_series = readSequenceFAST5Files<T>(series_file_names, num_series, &sequences, &series_file_names, &sequence_lengths); }
 #endif
         else{ actual_num_series = readSequenceTextFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
 
@@ -53,9 +53,9 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 			exit(CANNOT_READ_SEQUENCE_PREFIX_FILE);
 		}
 		chopPrefixFromSequences<T>(*seqprefix, *seqprefix_length, &sequences, actual_num_series, sequence_lengths, series_file_names, output_prefix);
-		cudaFreeHost(*seqprefix);
-		cudaFreeHost(seqprefix);
-		cudaFreeHost(seqprefix_length);
+		cudaFreeHost(*seqprefix); CUERR("Freeing CPU memory for the prefix sequence");
+		cudaFreeHost(seqprefix); CUERR("Freeing CPU memory for the prefix sequencers pointer");
+		cudaFreeHost(seqprefix_length); CUERR("Freeing CPU memory for the prefix sequence length");
 	}
         performDBA<T>(sequences, actual_num_series, sequence_lengths, series_file_names, convergence_delta, use_open_start, use_open_end, output_prefix, (T **) &averageSequence, &averageSequenceLength);
 
@@ -68,7 +68,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	avg_file.close();
 
 	// Cleanup
-        for (int i = 0; i < num_series; i++){ cudaFreeHost(sequences[i]); }
+        for (int i = 0; i < num_series; i++){ cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a sequence");}
         cudaFreeHost(sequences); CUERR("Freeing CPU memory for the sequence pointers");
 	cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the sequence lengths");
 	cudaFreeHost(averageSequence); CUERR("Freeing CPU memory for the DBA result");
