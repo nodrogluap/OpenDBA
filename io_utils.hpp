@@ -12,6 +12,27 @@
 // Text progress bar UI element
 static char spinner[] = { '|', '/', '-', '\\'};
 
+template <typename T>
+__host__
+int 
+writeSequences(T **cpu_sequences, size_t *seq_lengths, char **seq_names, int num_seqs, const char *filename){
+	std::ofstream out(filename);
+        if(!out.is_open()){
+                std::cerr << "Cannot write to " << filename << std::endl;
+                return CANNOT_WRITE_DTW_PATH_MATRIX;
+        }
+	for(int i = 0; i < num_seqs; i++){
+		T * seq = cpu_sequences[i];
+		out << seq_names[i] << "\t" << seq[0];
+		for(int j = 1; j < seq_lengths[i]; j++){
+			out << "\t" << seq[j];
+		}
+		out << std:: endl;
+	}
+	out.close();
+	return 0;
+}
+
 __host__
 int writeDTWPathMatrix(unsigned char *um_pathMatrix, const char *filename, size_t num_columns, size_t num_rows, size_t pathPitch){
 
