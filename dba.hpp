@@ -145,8 +145,8 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 			descendingPriority++;
 		}
 		for(size_t offset_within_seq = 0; offset_within_seq < maxSeqLength; offset_within_seq += threadblockDim.x){
-			// We have a circular buffer in shared memory of three diagonals for minimal proper DTW calculation.
-        		int shared_memory_required = threadblockDim.x*sizeof(T)*3;
+			// We have a circular buffer in shared memory of three diagonals for minimal proper DTW calculation, and an array for an inline findMin()
+        		int shared_memory_required = threadblockDim.x*3*sizeof(T);
 			// Null unsigned char pointer arg below means we aren't storing the path for each alignment right now.
 			// And (T *) 0, (size_t) 0, (T *) 0, (size_t) 0, means that the sequences to be compared will be defined by seq_index (1st, Y axis seq) and the block x index (2nd, X axis seq)
 			DTWDistance<<<gridDim,threadblockDim,shared_memory_required,seq_stream>>>((T *) 0, (size_t) 0, (T *) 0, (size_t) 0, seq_index, offset_within_seq, gpu_sequences[currDevice], maxSeqLength,
@@ -376,7 +376,7 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 		//std::cerr << "length of dtw limit is " << dtw_limit << std::endl;
                 for(size_t offset_within_seq = 0; offset_within_seq < dtw_limit; offset_within_seq += threadblockDim.x){
                         // We have a circular buffer in shared memory of three diagonals for minimal proper DTW calculation.
-                        int shared_memory_required = threadblockDim.x*sizeof(T)*3;
+                        int shared_memory_required = threadblockDim.x*3*sizeof(T);
 			// 0 arg here means that we are not storing the pairwise distance (total cost) between the sequences back out to global memory.
                         if(flip_seq_order){
 				// Specify both the first and second sequences explicitly (seq_inex will actually be ignored)
@@ -676,11 +676,17 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
 	int IGNORED_NUM_SEQS = 0;
 	T *NO_FINAL_COST_PAIR_MATRIX = 0;
         cudaStream_t *seq_streams;
-	cudaMallocHost(&seq_streams, sizeof(cudaStream_t)*deviceCount);
+	cudaMallocHost(&seq_streams, sizeof(cudaStream_t)*deviceCount); CUERR("Allocating CPU memory for sequence processing streams");
         T **dtwCostSoFars = 0;
-	cudaMallocHost(&dtwCostSoFars, sizeof(T *)*deviceCount);
-        unsigned char **pathMatrixs = 0;
-	cudaMallocHost(&pathMatrixs, sizeof(unsigned char *)*deviceCount);
+	cudaMallocHost(&dtwCostSoFars, sizeof(T *)*deviceCount); CUERR("Allocating CPU memory for GPU DTW cost memory pointers");
+	unsigned char **pathMatrixs = 0;
+	cudaMallocHost(&pathMatrixs, sizeof(unsigned char *)*deviceCount); CUERR("Allocating CPU memory for GPU DTW path matrix pointers");
+	// Record how many hits there are to each position in the leader in each input sequence.
+        int **leaderPathHistograms = 0;
+	cudaMallocHost(&leaderPathHistograms, sizeof(int **)*num_sequences); CUERR("Allocating CPU memory for leader path histogram pointers");
+	for(int i = 0; i < num_sequences; i++){	 
+		cudaMallocHost(&leaderPathHistograms[i], sizeof(int)*sequence_prefix_length); CUERR("Allocating CPU memory for a leader path histogram");
+	}
         for(size_t seq_swath_start = 0; seq_swath_start < num_sequences; seq_swath_start += deviceCount){
 
 		for(int currDevice = 0; currDevice < deviceCount; currDevice++){
@@ -704,7 +710,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
                 	cudaMallocManaged(&pathMatrixs[currDevice], pathPitch*sequence_prefix_length*sizeof(unsigned char)); CUERR("Allocating pitched GPU memory for prefix:sequence path matrix for prefix chopping");
 
        			dim3 threadblockDim(maxThreads[currDevice], 1, 1);
-			int shared_memory_required = threadblockDim.x*sizeof(T)*3;
+			int shared_memory_required = threadblockDim.x*3*sizeof(T);
 			for(size_t offset_within_seq = 0; offset_within_seq < current_seq_length; offset_within_seq += threadblockDim.x){
         			DTWDistance<<<1,threadblockDim,shared_memory_required,seq_streams[currDevice]>>>(gpu_sequence_prefixs[currDevice], sequence_prefix_length, 
 												      	     gpu_sequences[currDevice]+seq_index*maxLength, current_seq_length, 
@@ -725,6 +731,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
 			cudaSetDevice(currDevice); CUERR("Setting active device for DTW path matrix results");
                 	cudaStreamSynchronize(seq_streams[currDevice]); CUERR("Synchronizing CUDA device after sequence prefix swath calculation");
 			cudaStreamDestroy(seq_streams[currDevice]); CUERR("Destroying now-redundant CUDA device stream");
+			cudaFree(dtwCostSoFars[currDevice]);
 
        			// Need to run an open end DTW to find where the end of the prefix is in the input sequence based on the path
 			// TODO: parallelize within each GPU (see memory alloc note below).
@@ -737,8 +744,9 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
                 	cudaMallocHost(&cpu_pathMatrix, sizeof(unsigned char)*pathPitch*sequence_prefix_length); CUERR("Allocating host memory for prefix DTW path matrix copy");
                 	cudaMemcpy(cpu_pathMatrix, pathMatrixs[currDevice], sizeof(unsigned char)*pathPitch*sequence_prefix_length, cudaMemcpyDeviceToHost); CUERR("Copying prefix DTW path matrix from device to host");
 #if DEBUG == 1
-			writeDTWPathMatrix(pathMatrixs[currDevice], (std::string("prefixchop_costmatrix")+std::to_string(seq_index)).c_str(), columnLimit+1, rowLimit+1, pathPitch);
+//			writeDTWPathMatrix(pathMatrixs[currDevice], (std::string("prefixchop_costmatrix")+std::to_string(seq_index)).c_str(), columnLimit+1, rowLimit+1, pathPitch);
 #endif
+			cudaFree(pathMatrixs[currDevice]);
 
                 	int moveI[] = { -1, -1, 0, -1, 0 };
                 	int moveJ[] = { -1, -1, -1, 0, -1 };
@@ -751,9 +759,16 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
                         	move = cpu_pathMatrix[pitchedCoord(j,i,pathPitch)];
                 	}
 			chopPositions[seq_index] = j;
+			// Now record how many positions in the query correspond to each position in the leader.
+			int *leaderPathHistogram = leaderPathHistograms[seq_index];
+			leaderPathHistogram[i] = 1;
+			while (move != NIL) {
+                                i += moveI[move];
+                                j += moveJ[move];
+				leaderPathHistogram[i]++;
+                                move = cpu_pathMatrix[pitchedCoord(j,i,pathPitch)];
+                        }
                 	cudaFreeHost(cpu_pathMatrix);
-			cudaFree(pathMatrixs[currDevice]);
-			cudaFree(dtwCostSoFars[currDevice]);
         	}
 	}
 	cudaFreeHost(seq_streams); CUERR("Freeing CPU memory for prefix chopping CUDA streams");
@@ -782,14 +797,23 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
                 	std::cerr << "Running memcpy to copy prefix chopped sequence failed";
                 	exit(CANNOT_COPY_PREFIX_CHOPPED_SEQ);
         	}
+		chop << sequence_names[i] << "\t" << chopPositions[i] << "\t" << sequence_lengths[i];
+		int *leaderPathHistogram = leaderPathHistograms[i];
+		for(int j = 0; j < sequence_prefix_length; j++){
+			chop << "\t" << leaderPathHistogram[j];
+		}
+		chop << std::endl;
 		cudaFreeHost((*cpu_sequences)[i]); CUERR("Freeing original sequence pointer on host");
 		(*cpu_sequences)[i] = new_seq;
 		sequence_lengths[i] = chopped_seq_length;
-		chop << sequence_names[i] << "\t" << chopPositions[i] << std::endl;
+		cudaFreeHost(leaderPathHistograms[i]); CUERR("Freeing a leader path histogram array on host");
 	}
 	chop.close();
 
+	// TODO: normalize the signal based on the leader match
+
 	cudaFreeHost(chopPositions); CUERR("Freeing chop position records on host");
+	cudaFreeHost(leaderPathHistograms); CUERR("Freeing leader path histogram pointer array on host");
 }
 
 #endif
