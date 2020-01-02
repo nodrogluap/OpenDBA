@@ -20,7 +20,8 @@ extern "C"{
 }
 #endif
 
-#define CONCAT3(a,b,c)   std::string(a)+std::string(b)+std::string(c)
+#define CONCAT2(a,b)   (std::string(a)+std::string(b))
+#define CONCAT3(a,b,c)   (std::string(a)+std::string(b)+std::string(c))
 
 unsigned int FileRead( std::istream & is, std::vector <char> & buff ) {
     is.read( &buff[0], buff.size() );
