@@ -12,4 +12,27 @@
 
 #define DIV_ROUNDUP(numerator, denominator) (((numerator) + (denominator) - 1)/(denominator))
 
+// Find the smallest value for a local variable within a warp 
+template<typename T>
+__inline__ __device__ T warpReduceMin(T val){
+    for (int offset = CUDA_WARP_WIDTH/2; offset > 0; offset /= 2){
+        T tmpVal = __shfl_down_sync(FULL_MASK, val, offset);
+        if (tmpVal < val){
+            val = tmpVal;
+        }
+    }
+    return val;
+}
+
+template<typename T>
+__inline__ __device__ T warpReduceMax(T val){
+    for (int offset = CUDA_WARP_WIDTH/2; offset > 0; offset /= 2){
+        T tmpVal = __shfl_down_sync(FULL_MASK, val, offset);
+        if (tmpVal > val){
+            val = tmpVal;
+        }
+    }
+    return val;
+}
+
 #endif
