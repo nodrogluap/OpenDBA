@@ -22,6 +22,9 @@ endif
 
 all: $(PROGNAME)
 
+clean:
+	rm -f openDBA.o multithreading.o fastcluster.o $(PROGNAME)
+
 # Following two targets are small external libraries with more less restrictive licenses (see headers for license info)
 multithreading.o: multithreading.cpp
 	nvcc -c $< -o $@
