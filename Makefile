@@ -6,7 +6,7 @@ DOUBLE_UNSUPPORTED=0
 HDF5_SUPPORTED=0
 DEBUG=0
 # For kernel-side sqrt() support and getDeviceCount() calls respectively
-NVCC_FLAGS+= --expt-relaxed-constexpr -rdc=true
+NVCC_FLAGS+= --expt-relaxed-constexpr -rdc=true -maxrregcount 26 
 
 ifeq ($(DEBUG),1)
   NVCC_FLAGS+= -g -G --std=c++11
