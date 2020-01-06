@@ -496,7 +496,7 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
  *                pointer to the resulting sequence barycenter array. Array will be allocated by this function, so must be freed by caller with cudaFreeHost(barycenter) 
  */
 template <typename T>
-__host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, double convergence_delta, int use_open_start, int use_open_end, char *output_prefix, T **barycenter, size_t *barycenter_length, cudaStream_t stream=0) {
+__host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, int use_open_start, int use_open_end, char *output_prefix, T **barycenter, size_t *barycenter_length, cudaStream_t stream=0) {
 
 	// Sort the sequences by length for memory efficiency in computation later on.
 	size_t *sequence_lengths_copy;
@@ -557,14 +557,13 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 #endif
 	cudaSetDevice(0);
 	for (int i = 0; i < maxRounds; i++) {
-		std::cerr << std::endl << "Step 3 of 3 (round " << (i+1) << " of max " << maxRounds << " to find delta < " << convergence_delta << "): Converging centroid" << std::endl;
+		std::cerr << std::endl << "Step 3 of 3 (round " << (i+1) << " of max " << maxRounds << " to achieve delta 0): Converging centroid" << std::endl;
 		double delta = DBAUpdate(gpu_barycenter, medoidLength, gpu_sequences[0], maxLength, num_sequences, sequence_lengths, gpu_sequence_lengths[0], use_open_start, use_open_end, new_barycenter, stream);
 		std::cerr << std::endl << "New delta is " << delta << std::endl;
-		if(delta < convergence_delta){
+		if(delta == 0){
 			break;
 		}
-		cudaMemcpy(gpu_barycenter, new_barycenter, sizeof(T)*medoidLength, cudaMemcpyHostToDevice);
-		// TODO: detect possible state where centroid bounces back and forth between two sequences (if very small convergence delta and high entrpoy signals are provided).
+		cudaMemcpy(gpu_barycenter, new_barycenter, sizeof(T)*medoidLength, cudaMemcpyHostToDevice);  CUERR("Copying updated DBA medoid to GPU");
 	}
 
 	/* Rescale the average to the centroid's value range. */
@@ -785,7 +784,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
 	// We're going to have to free the incoming sequences once we've chopped them down and made a new more compact copy.
 	std::ofstream chop((std::string(output_prefix)+std::string(".prefix_chop.txt")).c_str());
 	for(int i = 0; i < num_sequences; i++){
-		size_t chopped_seq_length = sequence_lengths[i] - chopPositions[i] - 1;
+		size_t chopped_seq_length = sequence_lengths[i] - chopPositions[i];
 		if(chopped_seq_length == 0){
 			// TODO: remove from the inputs entirely as there is nothing left? 
 			continue;
