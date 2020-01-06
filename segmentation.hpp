@@ -3,15 +3,13 @@
 
 // For INT_MAX
 #include <climits>
-// For FLT_MAX etc.
-#include <cfloat>
 #include "cuda_utils.hpp"
 #include "limits.hpp" // for device side numeric_limits min() and max()
 
 using namespace cudahack; // for device side numeric_limits
 
 /* The following kernel function is used to do data reduction of unimodal queries
-   (e.g. nanopore 4000Hz raw current data to dwell segments, a.k.a. "events" in a "squiggle")
+   (e.g. nanopore 3000 or 4000Hz raw current data to dwell segments, a.k.a. "events" in a "squiggle")
    with the Bellman k-segmentation (dynamic programming) algorithm and even weights for sample error.
    The minimized measure is the mean squared error of the segmental regression.
    The segmentation is "adaptive" insofar as a maximum number of expected segments is passed in, but if 
@@ -43,19 +41,22 @@ using namespace cudahack; // for device side numeric_limits
 // so expecting a wrapper function to do this en masse for us and we just use a non-overlapping slice of it.
 
 // Fancy math here to ensure that a variable is memory aligned for the size of T (you can't use __align__ when x is a dynamic pointer, like in threadblock shared memory)
-#define LOCATION(x) (reinterpret_cast<size_t>(x))
+// Note that we've explicitly limited ourselves to 64 bit systems here, as uintptr_t type requires C++11, which is *still* flakey in some compilers shipped with modern OSes
+#define LOCATION(x) (reinterpret_cast<unsigned long long>(x))
 #define SHARED_MEM_ALIGN(T,x) x = (T *) (sizeof(T)*DIV_ROUNDUP(LOCATION(x),sizeof(T)))
 
 template<typename T>
 __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_lengths, int raw_samples_per_threadblock, short max_expected_k, 
-                                             short downsample_width, int min_segment_size, int sharedMemSize, unsigned short *k_seg_path_working_buffer, 
+                                             int min_segment_size, int sharedMemSize, unsigned short *k_seg_path_working_buffer, 
                                              T *output_segmental_medians){
 
+	// Recomputed rather than passed in to save SM registers, must correspond to same line in the host function further below.
+	short downsample_width = DIV_ROUNDUP(min_segment_size,3);
 	int orig_N = all_series_lengths[blockIdx.x];
 	if(blockIdx.y*raw_samples_per_threadblock > orig_N){ // no data to process
 		return; // this is safe as all threads in this block will take this short-circuit branch and not cause hangs in the __syncthreads() calls below
 	}
-	T *series = all_series[blockIdx.x];
+	const T *series = all_series[blockIdx.x];
 
 	// "*_before_us" vars are used to determine the offset of this threadblock's required global memory intermediate-working and output values.
 	// As the input all_series is a ragged array, we need to figure out where to write the values for this query
@@ -66,8 +67,9 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 		// K segments guaranteed per full threadblock. Count all full thread blocks for this query, plus the last partial block.
 		int query_length = all_series_lengths[query_num];
 		datapoints_before_us += query_length/downsample_width;
-		segments_before_us += query_length/raw_samples_per_threadblock*max_expected_k + DIV_ROUNDUP((query_length%raw_samples_per_threadblock),(raw_samples_per_threadblock/max_expected_k));
+		segments_before_us += DIV_ROUNDUP(query_length,raw_samples_per_threadblock)*max_expected_k;
 	}
+	// Account for offset within this seq
 	datapoints_before_us += raw_samples_per_threadblock/downsample_width*blockIdx.y;
 	segments_before_us += blockIdx.y*max_expected_k;
 
@@ -75,8 +77,9 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 	int N = ((blockIdx.y+1)*raw_samples_per_threadblock > orig_N) ? orig_N%raw_samples_per_threadblock : raw_samples_per_threadblock;
 
 	// If this is the last thread block for this query, pro-rate the expected_k passed in (which is for a full threadblock)
+	int expected_k = max_expected_k;
 	if((blockIdx.y+1)*raw_samples_per_threadblock > orig_N){
-		max_expected_k = DIV_ROUNDUP((orig_N%raw_samples_per_threadblock),DIV_ROUNDUP(raw_samples_per_threadblock, max_expected_k));
+		expected_k = DIV_ROUNDUP((orig_N%raw_samples_per_threadblock),DIV_ROUNDUP(raw_samples_per_threadblock, max_expected_k));
 	}
 
         int N_ds = N/downsample_width;
@@ -84,6 +87,7 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
         // Must allocate shared memory in bytes before it can be cast to the template variable
         unsigned short *breakpoints = shared_memory_proxy<unsigned short>();   // size = max_expected_k+1
         unsigned int *options = reinterpret_cast<unsigned int *>(&breakpoints[max_expected_k+1]); // size = N_ds+1
+	SHARED_MEM_ALIGN(unsigned int, options);
 
         // Keep a matrix of the total segmentation costs for any p-segmentation of a subsequence series[1:n] where 1<=p<=k and 1<=n<=N. The 0th column at
         // the beginning encodes that a (k-1)-segmentation is penalized compared to a whole-segment average.
@@ -106,8 +110,8 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 
 	// We will rewrite the data to be segmented as unsigned characters (256 levels) so we can cram as much into L1 cache as possible. To
 	// do this we need to find the downsampled min and max values, then scale everything to that so we lose as little resolution as possible.
-	T *T_max = &downsample_qtype[N_ds];   // size = N_ds/CUDA_WARP_WIDTH during map, single value after reduce
-	T *T_min = &T_max[N_ds/CUDA_WARP_WIDTH];  // size = N_ds/CUDA_WARP_WIDTH during map, single value after reduce
+	volatile T *T_max = &downsample_qtype[N_ds];   // size = N_ds/CUDA_WARP_WIDTH during map, single value after reduce
+	volatile T *T_min = &T_max[N_ds/CUDA_WARP_WIDTH];  // size = N_ds/CUDA_WARP_WIDTH during map, single value after reduce
 	T warp_max = threadIdx.x < N_ds ? downsample_qtype[threadIdx.x] : numeric_limits<T>::min();
         T warp_min = threadIdx.x < N_ds ? downsample_qtype[threadIdx.x] : numeric_limits<T>::max();
 	__syncwarp();
@@ -126,7 +130,7 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 		warp_max = warpReduceMax<T>(warp_max); // across all threads in the block
                 warp_min = (threadIdx.x < N_ds / CUDA_WARP_WIDTH) ? T_min[lane] : numeric_limits<T>::max();
                 warp_min = warpReduceMin<T>(warp_min); // across all threads in the block
-		if(!lane){
+		if(!lane){ // first, master thread only
 			T_max[0] = warp_max;
 			T_max[1] = warp_min; // collapse answers in the L1 cache space
 			T_min = &T_max[1];
@@ -136,51 +140,50 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                 
         // Note that options, K_SEG_* and DIST are all indexed starting at 1, not 0 for logical simplicity.
         // An index array allowing for the reconstruction of the regression with the lowest cost.
-        unsigned short *k_seg_path = &k_seg_path_working_buffer[max_expected_k*datapoints_before_us];
+        unsigned short *k_seg_path = &k_seg_path_working_buffer[expected_k*datapoints_before_us];
 
-	// Following variable clobbers the warp min/maxes that we don't need anymore. Need the +2 because we are retaining the threadblock max
-        unsigned int *squares = reinterpret_cast<unsigned int *>(&downsample_qtype[N_ds+2]);  // size = N_ds*e, dynamic based on determination of 'e' below
+	// Following variable clobbers the warp min/maxes arrays that we don't need anymore. Need the +2 because we are retaining the singular threadblock max and min.
+        volatile unsigned int *squares = reinterpret_cast<volatile unsigned int *>(&downsample_qtype[N_ds+2]);  // size = N_ds*e, dynamic based on determination of 'e' below
 	SHARED_MEM_ALIGN(unsigned int, squares);
 
-        bool exit = false;
-	int expected_k = max_expected_k;
+       	// To save memory and split homopolymers in nanopore data, cap the size of any given segment. This assumes some kind of Poisson like distribution for segment size.
+       	// The extent (e) of the DP search for any given downsamples data index, just a short name for readability of SUMS(), SQUARES(), etc. macro calls below
+       	int e = (sharedMemSize-LOCATION(squares)+LOCATION(breakpoints))/(N_ds*(sizeof(unsigned short)+(sizeof(unsigned int)))); // bytes available/needed_per_datapoint
+       	volatile unsigned short *sums = reinterpret_cast<volatile unsigned short *>(&squares[N_ds*e]); // size = N_ds*e (dynamic based on 'e')
+	// No need to align sums' pointer since the preceeding variable has a larger width (int vs short).
 
-        while(!exit) {
-        	// To save memory and split homopolymers in nanopore data, cap the size of any given segment. This assumes some kind of Poisson like distribution for segment size.
-       	 	// The extent (e) of the DP search for any given downsamples data index, just a short name for readability of SUMS(), SQUARES(), etc. macro calls below
-        	int e = (sharedMemSize-LOCATION(squares)+LOCATION(breakpoints))/(N_ds*(sizeof(unsigned short)+(sizeof(unsigned int)))); // bytes available/needed_per_datapoint
-        	unsigned short *sums = reinterpret_cast<unsigned short *>(&squares[N_ds*e]); // size = N_ds*e (dynamic based on 'e')
-		// No need to align sums' pointer since the preceeding variable has a larger width (int vs short).
+	// Populate the base case of the diagonal for each matrix.
+        if(threadIdx.x < N_ds){
+            	SUMS(threadIdx.x,threadIdx.x,e) = (unsigned char) (256.0*((downsample_qtype[threadIdx.x]-(*T_min))/((*T_max)-(*T_min)+1))); // +1 to avoid "div by 0" errors in edge case of absolutely no variance
+                SQUARES(threadIdx.x,threadIdx.x,e) = SUMS(threadIdx.x,threadIdx.x,e)*SUMS(threadIdx.x,threadIdx.x,e);
+        }
+        __syncthreads(); // Make sure we've loaded all the data before starting the compute.
 
-		// Populate the base case of the diagonal for each matrix.
-                if(threadIdx.x < N_ds){
-                	SUMS(threadIdx.x,threadIdx.x,e) = (unsigned char) (256.0*((downsample_qtype[threadIdx.x]-(*T_min))/((*T_max)-(*T_min)+1))); // +1 to avoid "div by 0" errors in edge case of absolutely no variance
-                        SQUARES(threadIdx.x,threadIdx.x,e) = SUMS(threadIdx.x,threadIdx.x,e)*SUMS(threadIdx.x,threadIdx.x,e);
-                }
-                __syncthreads(); // Make sure we've loaded all the data before starting the compute.
-
-                // In parallel, fill the cumulative sums and squares matrices over the range of allowed segment lengths (in downsampled units).
-                // For space efficiency, in the SUMS amd SQUARES macros we're storing as a square indexed on x:segment start location and y:possible segment length, not as a diagonal matrix.
-                // Note that we've constrained the maximum length of a segment to e due to memory considerations
-                // and assumption that a Poisson-like distribution governs segment length. This means that very long segments will be split
-                // automatically, e.g. homopolymers in nanopore data.
-                if(threadIdx.x < N_ds){
-                        for (int s=1; s < e; s++){ // s is the segment span (i.e. base 0)
-                                // Incrementally update every partial sum (unless we're past the end of the data in this thread)
-                                if(threadIdx.x + s < N_ds){
-                                        int idx = threadIdx.x;
-                                        SUMS(idx,idx+s,e) = SUMS(idx,idx+s-1,e) + SUMS(idx+s,idx+s,e);
-                                        SQUARES(idx,idx+s,e) = SQUARES(idx,idx+s-1,e) + SQUARES(idx+s,idx+s,e);
-                                }
+        // In parallel, fill the cumulative sums and squares matrices over the range of allowed segment lengths (in downsampled units).
+        // For space efficiency, in the SUMS amd SQUARES macros we're storing as a square indexed on x:segment start location and y:possible segment length, not as a diagonal matrix.
+        // Note that we've constrained the maximum length of a segment to e due to memory considerations
+        // and assumption that a Poisson-like distribution governs segment length. This means that very long segments will be split
+        // automatically, e.g. homopolymers in nanopore data.
+        if(threadIdx.x < N_ds){
+                for (int s=1; s < e; s++){ // s is the segment span (i.e. base 0)
+                // Incrementally update every partial sum (unless we're past the end of the data in this thread)
+                        if(threadIdx.x + s < N_ds){
+                                int idx = threadIdx.x;
+                                SUMS(idx,idx+s,e) = SUMS(idx,idx+s-1,e) + SUMS(idx+s,idx+s,e);
+                                SQUARES(idx,idx+s,e) = SQUARES(idx,idx+s-1,e) + SQUARES(idx+s,idx+s,e);
                         }
                 }
+        }
+        __syncthreads();
 
-                __syncthreads();
+        bool exit = false;
+
+        while(!exit) {
 
                 if(threadIdx.x < N_ds){
                         // Initialize regression distances for the case k=1 (a single segment) directly from the precomputed starting-at-zero cumulative distance calculations.
                         if(threadIdx.x+1 <= e) {
-                                K_SEG_DIST(1,threadIdx.x+1,N_ds) = DIST(1,threadIdx.x+1,e); // TODO indexing for standard, change to save memory
+                                K_SEG_DIST(1,threadIdx.x+1,N_ds) = DIST(1,threadIdx.x+1,e); 
                         } else {
                                 K_SEG_DIST(1,threadIdx.x+1,N_ds) = INT_MAX/2; // div by 2 to avoid overflow when adding later
                         }
@@ -250,18 +253,22 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                         }
                 }
                 if(!exit) {
-                        expected_k--; //TODO: binary search for optimal expected k 
+                        expected_k--; //TODO for efficiency: binary search for optimal expected k, rather than decremental search?
                 }
                 else{
-                	// At this point we can clobber all data in L1 cache variables as we are done with them.
+                	// At this point we can clobber all downaveraged and cumulative cost data in L1 cache variables as we are done with them.
                 	// Let's load the original data series now so the calculations below here will be less affected by latency in most threads.
-                	T *orig_data_copy = reinterpret_cast<T *>(downsample_qtype);
+                	// TODO: check if the original data is bigger than the L1 space we have available (i.e. a *huge* downaveraging width was applied), and downsample accordingly.
+                	volatile T *orig_data_copy = reinterpret_cast<volatile T *>(downsample_qtype);
                 	if(threadIdx.x*downsample_width+blockIdx.y*raw_samples_per_threadblock < orig_N){
                         	for(int i = 0; i < downsample_width && threadIdx.x*downsample_width + i < raw_samples_per_threadblock && threadIdx.x*downsample_width + i < N; i++){
                                 	orig_data_copy[threadIdx.x*downsample_width+i] = series[threadIdx.x*downsample_width+blockIdx.y*raw_samples_per_threadblock+i];
                         	}
 			}
 
+			// TODO: we should be able to note artificially created breakpoints in really long events and merge accordingly, these
+			// being indicated by left_boundary <-> right_boundary span of length e (our computational limit due to L1 cache constraints for cumulative cost matrices).
+				
 			if(threadIdx.x > expected_k && threadIdx.x <= max_expected_k) {
 				// Sentinel answer for unused result slots (K is smaller than the expect value passed in), since the amount of space for answers was preallocated.
                         	output_segmental_medians[segments_before_us+threadIdx.x-1] = numeric_limits<T>::max();
@@ -275,6 +282,7 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                         	if(right_boundary > N){
                                 	right_boundary = N;
                         	}
+				
                         	// Bubble sort the L1 cache values for each segment in place so we can run this quickly and easily get the median for each segment.
                         	int left_boundary = (breakpoints[threadIdx.x-1])*downsample_width;
                         	for(int i = left_boundary; i < right_boundary-1; ++i){ // +1 as starting point as left boundary is non-inclusive.
@@ -286,13 +294,14 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                                         	}
                                 	}
 				}
+
                         	// Write the segment median to global memory. *DO NOT* rely on the updated value in other parts of this kernel...
                         	// write cache is not coherent on all GPUs, and is only flushed on threadblock termination.
                         	if((left_boundary-right_boundary)%2){
                         		output_segmental_medians[segments_before_us+threadIdx.x-1] = orig_data_copy[(left_boundary+right_boundary)/2];
 				}
 				else{
-					output_segmental_medians[segments_before_us+threadIdx.x-1] = (orig_data_copy[left_boundary]+orig_data_copy[right_boundary])/2;
+					output_segmental_medians[segments_before_us+threadIdx.x-1] = (orig_data_copy[(left_boundary+right_boundary)/2]+orig_data_copy[(left_boundary+right_boundary)/2+1])/2;
 				}
                         	datapoints_before_us = blockIdx.y*raw_samples_per_threadblock;
                 	}
@@ -312,12 +321,12 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	// If a real sequence segment was split over two sample averaging windows, we need to ensure that the widnow is 1/3 (or less) of the segment length so
 	// as to get a representative median of that segment in at least one window.
 	int downaverage_width = DIV_ROUNDUP(min_segment_length,3);
-	int maximum_k_per_subtask = DIV_ROUNDUP(MAX_DP_SAMPLES,((float) min_segment_length)/downaverage_width);
 	short threads_per_block = CUDA_THREADBLOCK_MAX_THREADS;
-	int samples_per_block = MAX_DP_SAMPLES*downaverage_width;
-	if(threads_per_block > samples_per_block){	// any more threads than samples assigned per threadblock would cause neeedless spinning of the wheels
-		threads_per_block = samples_per_block;
+	if(threads_per_block > MAX_DP_SAMPLES){	// any more threads than samples assigned per threadblock would cause neeedless spinning of the wheels
+		threads_per_block = MAX_DP_SAMPLES;
 	}
+	int samples_per_block = threads_per_block*downaverage_width;
+	int maximum_k_per_subtask = DIV_ROUNDUP(threads_per_block,((float) min_segment_length)/downaverage_width);
 
 	// TODO: maybe do a number of grids and use multiple devices if present rather than doing all the computation in one grid (and the associated memory requirement of that)
 	
@@ -328,7 +337,9 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	T **gpu_rawseqs;
 	cudaMalloc(&gpu_rawseqs, sizeof(T *)*num_seqs);   CUERR("Allocating GPU memory for segmenting raw query starts");
 	T **rawseq_ptrs;
+	T **padded_segmented_sequences;
 	cudaMallocHost(&rawseq_ptrs, sizeof(T *)*num_seqs);   CUERR("Allocating GPU memory for segmenting raw query starts");
+        cudaMallocHost(&padded_segmented_sequences, sizeof(T *)*num_seqs); CUERR("Allocating CPU memory for the padded segmented sequence pointers");
         cudaMallocHost(segmented_sequences, sizeof(T *)*num_seqs); CUERR("Allocating CPU memory for the segmented sequence pointers");
 	cudaMallocHost(segmented_seq_lengths, sizeof(size_t)*num_seqs); CUERR("Allocating CPU memory for the segmented sequence lengths");
 	for(int i = 0; i < num_seqs; ++i){
@@ -346,13 +357,13 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	}
 	cudaMemcpyAsync(gpu_rawseqs, rawseq_ptrs, sizeof(T *)*num_seqs, cudaMemcpyHostToDevice, stream); CUERR("Launching raw query pointer array copy from CPU to GPU for segmentation");
 
-	// Allocate all of the memory required to store the segmnentation results in one go, then do the pointer math so that segmented_sequences
+	// Allocate all of the memory required to store the segmentation results in one go, then do the pointer math so that segmented_sequences
 	// points to the start of the results slice corresponding to each input sequence.
 	T *all_segmentation_results = 0;
 	cudaMallocManaged(&all_segmentation_results, sizeof(T)*total_expected_segments);     CUERR("Allocating managed memory for segmentation results");
 	long cursor = 0;
         for(int i = 0; i < num_seqs; ++i){
-		(*segmented_sequences)[i] = &all_segmentation_results[cursor];
+		padded_segmented_sequences[i] = &all_segmentation_results[cursor];
 		cursor += maximum_k_per_subtask*DIV_ROUNDUP(seq_lengths[i],samples_per_block);
 	}
 
@@ -372,12 +383,14 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	// Invoke the segmentation kernel once all the async memory copies are finished.
 	// Not neccesary if streams are working properly: cudaStreamSynchronize(stream);    CUERR("Synchronizing stream after raw query transfer to GPU for segmentation"); 
 	dim3 raw_grid(num_seqs, max_req_block_in_a_query, 1);
-	int maxSharedMemoryPerBlockOptin = 48*1024; // default for device backward compatibility
+	std::cerr << "Processing " << samples_per_block << " samples per threadblock with " << threads_per_block << " threads, max " << 
+                     maximum_k_per_subtask << " segments, grid (" << num_seqs << ", " << max_req_block_in_a_query << ",1)" << std::endl;
+	int maxSharedMemoryPerBlockOptin = 48*1024; // default is 48K for device backward compatibility
 	int deviceNum = 0;
 	cudaDeviceGetAttribute(&maxSharedMemoryPerBlockOptin, cudaDevAttrMaxSharedMemoryPerBlockOptin, deviceNum);
 	cudaFuncSetAttribute(reinterpret_cast<void*>(adaptive_device_segmentation<T>), cudaFuncAttributeMaxDynamicSharedMemorySize, maxSharedMemoryPerBlockOptin); // Maximize explicit use of L1 cache
-        adaptive_device_segmentation<T><<<raw_grid,threads_per_block,0,stream>>>(gpu_rawseqs,
-                               gpu_rawseq_lengths, samples_per_block, maximum_k_per_subtask, downaverage_width, min_segment_length, maxSharedMemoryPerBlockOptin, k_seg_path_working_buffer, 
+        adaptive_device_segmentation<T><<<raw_grid,threads_per_block,maxSharedMemoryPerBlockOptin,stream>>>(gpu_rawseqs,
+                               gpu_rawseq_lengths, samples_per_block, maximum_k_per_subtask, min_segment_length, maxSharedMemoryPerBlockOptin, k_seg_path_working_buffer, 
                                all_segmentation_results);  CUERR("Launching sequence segmentation");
 	cudaStreamSynchronize(stream);                  CUERR("Synchronizing stream after sequence segmentation");
         cudaFree(k_seg_path_working_buffer);            CUERR("Freeing GPU memory for segmentation paths");
@@ -390,40 +403,64 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	// At the same time, we allocated enough memory for segmentation results where the actual K in each subtask (kernel call grid element) was the expected K.
 	// If the adaptive segmentation actually found that there was less than K segments in the subtask, the remaining unused results slots will have a sentinel
 	// value, numeric_limits::max(T), that we must eliminate before passing the answer back to the caller.
-	cudaMemcpyAsync(*segmented_sequences, all_segmentation_results, sizeof(T)*total_expected_segments, cudaMemcpyDeviceToHost, stream);  CUERR("Copying sequence segmentation results to host");
-	cudaStreamSynchronize(stream);                  CUERR("Synchronizing stream after sequence segmentation results copy to host");
+	//cudaMemcpyAsync(cpu_all_segmentation_results, all_segmentation_results, sizeof(T)*total_expected_segments, cudaMemcpyDeviceToHost, stream);  CUERR("Copying sequence segmentation results to host");
+	//cudaStreamSynchronize(stream);                  CUERR("Synchronizing stream after sequence segmentation results copy to host");
 	T epsilon = std::numeric_limits<T>::max();
 	for(int i = 0; i < num_seqs; ++i){
-		int cursor = 0;
 		T previous_value = std::numeric_limits<T>::min();
-		T *segmented_sequence = (*segmented_sequences)[i];
+		T *segmented_sequence = padded_segmented_sequences[i];
 		size_t segmented_seq_length = (*segmented_seq_lengths)[i];
 		// Find the minimum signal value change between segments.
-		for(int j = 0; i < segmented_seq_length; ++i){
+		for(int j = 0; j < segmented_seq_length; ++j){
 			T current_value = segmented_sequence[j];
-			if(current_value - previous_value < epsilon){ // unused slots in the segmentation answer are max valued, so will not beat epsilon 
+                        if(current_value - previous_value < epsilon){ // unused slots in the segmentation answer are max valued, so will not beat epsilon 
 				epsilon = current_value-previous_value;
 			}
 			previous_value = current_value; 
 		}
 		// Merge segmentation subtask result boundary (left and right edge) segments that differ by less than that minimum.
-		for(int j = 0; i < segmented_seq_length; ++i){
-			if(cursor != j){ // We've skipped something already, so all subsequent segment values need to shift left
-				// Candidate for edge merge
-				if(cursor != 0 && j != 0 && segmented_sequence[j-1] == std::numeric_limits<T>::max()  // i.e. at the start of a new subtask range
-                                                         && segmented_sequence[cursor-1] < segmented_sequence[j]+epsilon // i.e. very similar
-							 && segmented_sequence[cursor-1] > segmented_sequence[j]-epsilon){	
-					segmented_sequence[cursor-1] = (segmented_sequence[cursor-1]+segmented_sequence[j])/2; // i.e. take the avg
-				}
-				else{ // Copy to results as-is.
+		bool prev_seg_val_undefined = false;
+		int cursor = 0;
+		//std::cerr << "Seq " << i;
+		for(int j = 0; j < segmented_seq_length; ++j){
+			// Candidate for edge merge
+			//if(j+maximum_k_per_subtask >= segmented_seq_length){
+			//if(j+2*maximum_k_per_subtask >= segmented_seq_length && j+maximum_k_per_subtask < segmented_seq_length){
+		//		std::cerr << " " << segmented_sequence[j];
+		//	}
+			if(prev_seg_val_undefined && // i.e. at the start of a new subtask range
+			   segmented_sequence[j] != std::numeric_limits<T>::max() &&
+                           segmented_sequence[cursor-1] < segmented_sequence[j]+epsilon && // i.e. very similar
+			   segmented_sequence[cursor-1] > segmented_sequence[j]-epsilon){	
+				segmented_sequence[cursor-1] = (segmented_sequence[cursor-1]+segmented_sequence[j])/2; // i.e. take the avg
+				prev_seg_val_undefined = false;
+			}
+			else if(segmented_sequence[j] == std::numeric_limits<T>::max()){
+				prev_seg_val_undefined = true;
+			}
+			else{
+				if(cursor != j){ // We've skipped something already, so all subsequent segment values need to shift left
+			                          // Copy to results as-is.
 					segmented_sequence[cursor] = segmented_sequence[j];
 				}
+				prev_seg_val_undefined = false;
+				cursor++;
 			}
-			cursor++;
 		}
+		//std::cerr << std::endl;
+
 		// Set the reported segments total for the seq to reflect the adaptive segmentation results.
 		(*segmented_seq_lengths)[i] = cursor;
+		//std::cerr << "Seq " << i << ", length = " << cursor << std::endl;
+
+		// Now that we know the real length, allocate the final memory for the sequence (so later we can free up the big block we wrote to in bulk)
+		cudaMallocManaged(&(*segmented_sequences)[i], sizeof(T)*cursor); CUERR("Allocating managed memory for a segmented sequence");
+		cudaMemcpyAsync((*segmented_sequences)[i], segmented_sequence, sizeof(T)*cursor, cudaMemcpyHostToHost, stream); CUERR("Copying a segmented sequence to managed memory");
 	}
+	cudaStreamSynchronize(stream); CUERR("Synchronizing stream after segemented sequence copy to managed memory");// ensure all the copying had finished before freeing the original results
+	cudaFreeHost(padded_segmented_sequences); CUERR("Freeing managed memory for segmented sequence pointers");
+	// No need to free this as the foirst pointer in padded_segmented_sequences is the same address.
+	//cudaFreeHost(all_segmentation_results);  CUERR("Freeing managed memory for segmented sequences buffer");
 }
 
 

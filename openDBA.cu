@@ -10,6 +10,7 @@
 #include "cpu_utils.hpp"
 #include "dba.hpp"
 #include "segmentation.hpp"
+#include "io_utils.hpp"
 
 #define TEXT_READ_MODE 0
 #define BINARY_READ_MODE 1
@@ -20,24 +21,33 @@
 
 template<typename T>
 void
-setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, double convergence_delta){
+setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length){
 	size_t *sequence_lengths = 0;
 	size_t averageSequenceLength = 0;
+	T **segmented_sequences = 0;
+	size_t *segmented_seq_lengths = 0;
 	void *averageSequence = 0;
 	T **sequences = 0;
 	int actual_num_series = 0; // excludes failed file reading
+
+	// Step 0. Read in data.
         if(read_mode == BINARY_READ_MODE){ actual_num_series = readSequenceBinaryFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
 	// In the following two the sequence names are from inside the file, not the file names themselves
         else if(read_mode == TSV_READ_MODE){ actual_num_series = readSequenceTSVFiles<T>(series_file_names, num_series, &sequences, &series_file_names, &sequence_lengths); }
 #if HDF5_SUPPORTED == 1
-        else if(read_mode == FAST5_READ_MODE){ actual_num_series = readSequenceFAST5Files<T>(series_file_names, num_series, &sequences, &series_file_names, &sequence_lengths); }
+        else if(read_mode == FAST5_READ_MODE){ 
+		actual_num_series = readSequenceFAST5Files<T>(series_file_names, num_series, &sequences, &series_file_names, &sequence_lengths); 
+#if DEBUG == 1
+		writeSequences(sequences, sequence_lengths, series_file_names, actual_num_series, CONCAT2(output_prefix, ".seqs.txt").c_str());
+#endif
+	}
 #endif
         else{ actual_num_series = readSequenceTextFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
 
 	// Shorten sequence names to everything before the first "." in the file name
 	for (int i = 0; i < actual_num_series; i++){ char *z = strchr(series_file_names[i], '.'); if(z) *z = '\0';}
 
-	// If a leading sequence was specified, chop it off all the inputs
+	// Step 1. If a leading sequence was specified, chop it off all the inputs.
 	if(seqprefix_file_name != 0){
 		T **seqprefix = 0;
 		size_t *seqprefix_length = 0;
@@ -57,9 +67,25 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 		cudaFreeHost(seqprefix); CUERR("Freeing CPU memory for the prefix sequencers pointer");
 		cudaFreeHost(seqprefix_length); CUERR("Freeing CPU memory for the prefix sequence length");
 	}
-        performDBA<T>(sequences, actual_num_series, sequence_lengths, series_file_names, convergence_delta, use_open_start, use_open_end, output_prefix, (T **) &averageSequence, &averageSequenceLength);
+	// Step 2. If a minimum segment length was provided, segment the input sequences into unimodal pieces. 
+	if(min_segment_length > 0){
+		std::cout << "Segmenting with minimum acceptable segment size of " << min_segment_length << std::endl;
+		adaptive_segmentation<T>(sequences, sequence_lengths, actual_num_series, min_segment_length, &segmented_sequences, &segmented_seq_lengths);
+#if DEBUG == 1
+		writeSequences(segmented_sequences, segmented_seq_lengths, series_file_names, actual_num_series, CONCAT2(output_prefix, ".segmented_seqs.txt").c_str());
+#endif
+        	for (int i = 0; i < actual_num_series; i++){ cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a presegmentation sequence");}
+        	cudaFreeHost(sequences); CUERR("Freeing CPU memory for the presegmentation sequence pointers");
+		cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the presegmentation sequence lengths");
+		sequences = segmented_sequences;
+		sequence_lengths = segmented_seq_lengths;
+	}
 
-	std::ofstream avg_file((std::string(output_prefix)+std::string(".avg.txt")).c_str());
+	// Step 3. The meat of this meal!
+        performDBA<T>(sequences, actual_num_series, sequence_lengths, series_file_names, use_open_start, use_open_end, output_prefix, (T **) &averageSequence, &averageSequenceLength);
+
+	// Step 4. Save results.
+	std::ofstream avg_file(CONCAT2(output_prefix, ".avg.txt").c_str());
 	if(!avg_file.is_open()){
 		std::cerr << "Cannot open sequence averages file " << output_prefix << ".avg.txt for writing" << std::endl;
 		exit(CANNOT_WRITE_DBA_AVG);
@@ -68,9 +94,9 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	avg_file.close();
 
 	// Cleanup
-        for (int i = 0; i < num_series; i++){ cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a sequence");}
-        cudaFreeHost(sequences); CUERR("Freeing CPU memory for the sequence pointers");
-	cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the sequence lengths");
+	for (int i = 0; i < actual_num_series; i++){ cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a sequence");}
+        cudaFreeHost(sequences); CUERR("Freeing CPU memory for the segmented sequence pointers");
+	cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the segmented sequence lengths");
 	cudaFreeHost(averageSequence); CUERR("Freeing CPU memory for the DBA result");
 }
 
@@ -88,16 +114,12 @@ int main(int argc, char **argv){
 #else
 		std::cout << "<int|uint|ulong|float|double> " <<
 #endif
-		          "<global|open_start|open_end|open> <output files prefix> <delta criterium for convergence, in range (0,1]> <prefix sequence to remove|/dev/null> <series.tsv|<series1> <series2> [series3...]>\n";
+		          "<global|open_start|open_end|open> <output files prefix> <minimum unimodal segment length, or 0 for no segmentation> <prefix sequence to remove|/dev/null> <series.tsv|<series1> <series2> [series3...]>\n";
 		exit(1);
      	}
 
 	int num_series = argc-7;
-	double convergence_delta = atof(argv[5]);
-	if(convergence_delta <= 0.0 || convergence_delta > 1){
-		std::cerr << "Fifth argument (" << argv[3] << ") could not be parsed into a number in the acceptable range (0,1]" << std::endl;
-		exit(1);
-	} 
+	int min_segment_length = atoi(argv[5]); // reasonable settings for nanopore RNA dwell time distributions would be 4 (lower to 2 for DNA)
 	int read_mode = TEXT_READ_MODE;
 	if(!strcmp(argv[1],"binary")){
 		read_mode = BINARY_READ_MODE;
@@ -144,22 +166,22 @@ int main(int argc, char **argv){
 	int argind = 7; // Where the file names start
 	// The following are all the data types supported by CUDA's atomicAdd() operation, so we support them too for best value precision maintenance.
 	if(!strcmp(argv[2],"int")){
-		setupAndRun<int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, convergence_delta);
+		setupAndRun<int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length);
 	}
 	else if(!strcmp(argv[2],"uint")){
-		setupAndRun<unsigned int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, convergence_delta);
+		setupAndRun<unsigned int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length);
 	}
 	else if(!strcmp(argv[2],"ulong")){
-		setupAndRun<unsigned long long>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, convergence_delta);
+		setupAndRun<unsigned long long>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length);
 	}
 	else if(!strcmp(argv[2],"float")){
-		setupAndRun<float>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, convergence_delta);
+		setupAndRun<float>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length);
 	}
 	// Only since CUDA 6.1 (Pascal and later architectures) is atomicAdd(double *...) supported.  Remove if you want to compile for earlier graphics cards.
 #if DOUBLE_UNSUPPORTED == 1
 #else
 	else if(!strcmp(argv[2],"double")){
-		setupAndRun<double>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, convergence_delta);
+		setupAndRun<double>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length);
 	}
 #endif
 	else{
