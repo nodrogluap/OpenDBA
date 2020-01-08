@@ -177,6 +177,10 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
         __syncthreads();
 
         bool exit = false;
+	// Variables for the binary search for maximum possible value of K that doesn't generate tiny noise segments.
+	short smallest_noisy_k_found = expected_k+1;
+	short test_expected_k = expected_k/2; 
+	short delta = test_expected_k/2;
 
         while(!exit) {
 
@@ -189,14 +193,14 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                         }
                         // Initialize the path for the trivial case where we have p segments through p datapoints.
                         // The right boundary for the p case is p by the pigeonhole principle.
-                        if(threadIdx.x < expected_k){
-                                K_SEG_PATH(threadIdx.x+1,threadIdx.x,N_ds) = (unsigned short) expected_k-1;
+                        if(threadIdx.x < test_expected_k){
+                                K_SEG_PATH(threadIdx.x+1,threadIdx.x,N_ds) = (unsigned short) test_expected_k-1;
                         }
                 }
                 __syncthreads();
 
                 // Now incrementally calculate the optimal p-segmentation solution in series for each 1 < p <= k.
-                for(int p=2; p <= expected_k; p++){
+                for(int p=2; p <= test_expected_k; p++){
 
                         for(int n=p; n <= N_ds; n++){ // start at p segments being created from p+1 data points, the first non-trivial case
                                 // Pick the dividing point with the lowest cumulative Mean Square Error distance measure.
@@ -233,8 +237,8 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                 // (the length of the input list), to that last segment's left border, taking the
                 // k-1 solution from that point, etc. until we get to the single segment which necessarily starts at the left edge (first input item).
                 if(! threadIdx.x){
-                        breakpoints[expected_k] = N_ds; 
-                        for (int p = expected_k-1; p >= 1; p--){
+                        breakpoints[test_expected_k] = N_ds; 
+                        for (int p = test_expected_k-1; p >= 1; p--){
                                 breakpoints[p] = K_SEG_PATH(p+1,breakpoints[p+1]-1,N_ds);
                         }
                         breakpoints[0] = 0; // Left exclusive boundary is always 0 (one-based indexing) so we start at data point 1 for any segmentation.
@@ -243,19 +247,28 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 
                 // Check if any ranges are unusually small data segments (i.e. <min_segment_size/downsample_width), which means that we're letting the noise in the data still create segments where they shouldn't.
                 // If this is the case, we want to lower the expected number of segments (hence "adaptive" in the function name) and try again.
-                exit = true;
-                for(int i = 1; i <= expected_k; i++) {
+		bool noisy = false;
+                for(int i = 1; i <= test_expected_k; i++) {
                         int left = breakpoints[i-1];
                         int right = breakpoints[i];
                         // Redundant computation amongst threads here is as a single computation followed by __syncthreads() because of unsynchronized median calculation below.
                         if(right-left < min_segment_size/downsample_width){ 
-                                exit = false;
+				noisy = true;
                         }
                 }
-                if(!exit) {
-                        expected_k--; //TODO for efficiency: binary search for optimal expected k, rather than decremental search?
-                }
-                else{
+		if(test_expected_k != 1 && noisy){
+			smallest_noisy_k_found = test_expected_k;
+               		test_expected_k -= delta;
+		}
+		else{
+			if(smallest_noisy_k_found == test_expected_k + 1){
+				// Exit condition found, the biggest possible k value that's non-noisy.
+				exit = true;
+			}
+			test_expected_k += delta;
+		}
+		delta = DIV_ROUNDUP(delta,2);
+                if(exit){
                 	// At this point we can clobber all downaveraged and cumulative cost data in L1 cache variables as we are done with them.
                 	// Let's load the original data series now so the calculations below here will be less affected by latency in most threads.
                 	// TODO: check if the original data is bigger than the L1 space we have available (i.e. a *huge* downaveraging width was applied), and downsample accordingly.
@@ -269,14 +282,14 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 			// TODO: we should be able to note artificially created breakpoints in really long events and merge accordingly, these
 			// being indicated by left_boundary <-> right_boundary span of length e (our computational limit due to L1 cache constraints for cumulative cost matrices).
 				
-			if(threadIdx.x > expected_k && threadIdx.x <= max_expected_k) {
+			if(threadIdx.x > test_expected_k && threadIdx.x <= max_expected_k) {
 				// Sentinel answer for unused result slots (K is smaller than the expect value passed in), since the amount of space for answers was preallocated.
                         	output_segmental_medians[segments_before_us+threadIdx.x-1] = numeric_limits<T>::max();
 			}
 
                 	// In parallel, get the median from each segment and set its value in the constant cache query value.
                 	// We are using the median rather than the mean as it is less affected by outlier datapoints caused by noise.
-                	else if(threadIdx.x > 0 && threadIdx.x <= expected_k){
+                	else if(threadIdx.x > 0 && threadIdx.x <= test_expected_k){
                         	int right_boundary = breakpoints[threadIdx.x]*downsample_width;
                         	// Bounds check as last coordinate may represent a partial downsample since the original data length is not necessarily a multiple of downsample_width.
                         	if(right_boundary > N){
