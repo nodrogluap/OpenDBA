@@ -44,6 +44,12 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 #endif
         else{ actual_num_series = readSequenceTextFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
 
+	// Sanity check
+	if(actual_num_series < 2){
+		std::cerr << "At least two sequences must be provided to calculate an average, but found " << actual_num_series << ", aborting" << std::endl;
+                exit(NOT_ENOUGH_SEQUENCES);
+	}
+
 	// Shorten sequence names to everything before the first "." in the file name
 	for (int i = 0; i < actual_num_series; i++){ char *z = strchr(series_file_names[i], '.'); if(z) *z = '\0';}
 

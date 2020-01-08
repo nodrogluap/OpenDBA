@@ -606,7 +606,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
         // Send the sequence metadata and data out to all the devices being used.
         int deviceCount;
         cudaGetDeviceCount(&deviceCount); CUERR("Getting GPU device count in prefix chop method");
-        //std::cerr << "Devices found: " << deviceCount << "for " << num_sequences << " sequiences " << std::endl;
+        std::cerr << "Chopping sequence prefixes" << std::endl;
 
         size_t **gpu_sequence_lengths = 0;
         cudaMallocHost(&gpu_sequence_lengths, sizeof(size_t **)*deviceCount); CUERR("Allocating GPU memory for array of sequence lengths for chopping");
