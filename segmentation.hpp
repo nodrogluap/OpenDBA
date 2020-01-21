@@ -119,7 +119,7 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 	warp_max = warpReduceMax<T>(warp_max); // across the warp
 	int lane = threadIdx.x % CUDA_WARP_WIDTH;
 	int wid = threadIdx.x / CUDA_WARP_WIDTH;
-	if(!lane){
+	if(!lane && wid < N_ds/CUDA_WARP_WIDTH){
 		T_max[wid] = warp_max;
 		T_min[wid] = warp_min;
 	}
@@ -265,7 +265,9 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 				// Exit condition found, the biggest possible k value that's non-noisy.
 				exit = true;
 			}
-			test_expected_k += delta;
+			else{
+				test_expected_k += delta;
+			}
 		}
 		delta = DIV_ROUNDUP(delta,2);
                 if(exit){
