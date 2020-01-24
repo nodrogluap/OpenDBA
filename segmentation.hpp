@@ -61,8 +61,8 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 	// "*_before_us" vars are used to determine the offset of this threadblock's required global memory intermediate-working and output values.
 	// As the input all_series is a ragged array, we need to figure out where to write the values for this query
 	// by summing up the lengths of the raw and segmented data before this block.
-	int datapoints_before_us = 0;
-	int segments_before_us = 0;
+	size_t datapoints_before_us = 0;
+	size_t segments_before_us = 0;
 	for(int query_num = 0; query_num < blockIdx.x; query_num++){
 		// K segments guaranteed per full threadblock. Count all full thread blocks for this query, plus the last partial block.
 		int query_length = all_series_lengths[query_num];
@@ -140,7 +140,7 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                 
         // Note that options, K_SEG_* and DIST are all indexed starting at 1, not 0 for logical simplicity.
         // An index array allowing for the reconstruction of the regression with the lowest cost.
-        unsigned short *k_seg_path = &k_seg_path_working_buffer[expected_k*datapoints_before_us];
+        unsigned short *k_seg_path = &k_seg_path_working_buffer[max_expected_k*datapoints_before_us];
 
 	// Following variable clobbers the warp min/maxes arrays that we don't need anymore. Need the +2 because we are retaining the singular threadblock max and min.
         volatile unsigned int *squares = reinterpret_cast<volatile unsigned int *>(&downsample_qtype[N_ds+2]);  // size = N_ds*e, dynamic based on determination of 'e' below
