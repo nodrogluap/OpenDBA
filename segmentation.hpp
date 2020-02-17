@@ -372,7 +372,7 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
         	total_expected_segments += (*segmented_seq_lengths)[i];
 
     		// Asynchronously slurp each query into device memory for maximum PCIe bus transfer rate efficiency from CPU to the GPU via the Copy Engine, or lazy copy in managed memory. 
-    		cudaMallocManaged(&rawseq_ptrs[i], sizeof(T)*seq_lengths[i]);   CUERR("Allocating GPU memory for segmenting raw input sequence");
+    		cudaMalloc(&rawseq_ptrs[i], sizeof(T)*seq_lengths[i]);   CUERR("Allocating GPU memory for segmenting raw input sequence");
     		cudaMemcpyAsync(rawseq_ptrs[i], sequences[i], sizeof(T)*seq_lengths[i], cudaMemcpyHostToDevice, stream);          CUERR("Launching raw query copy to managed memory for segmentation");
 	}
 	cudaMemcpyAsync(gpu_rawseqs, rawseq_ptrs, sizeof(T *)*num_seqs, cudaMemcpyHostToDevice, stream); CUERR("Launching raw query pointer array copy from CPU to GPU for segmentation");
@@ -398,7 +398,7 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	// It's too big to fit in L1 cache, so use global memory, or host if required via Managed Memory :-P
 	unsigned short *k_seg_path_working_buffer;
         size_t k_seg_path_size = sizeof(unsigned short)*(all_seqs_total_length/downaverage_width+1)*maximum_k_per_subtask;
-	cudaMallocManaged(&k_seg_path_working_buffer, k_seg_path_size);     CUERR("Allocating managed memory for segmentation paths");
+	cudaMalloc(&k_seg_path_working_buffer, k_seg_path_size);     CUERR("Allocating managed memory for segmentation paths");
 
 	// Invoke the segmentation kernel once all the async memory copies are finished.
 	// Not neccesary if streams are working properly: cudaStreamSynchronize(stream);    CUERR("Synchronizing stream after raw query transfer to GPU for segmentation"); 
