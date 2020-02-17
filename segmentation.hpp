@@ -179,7 +179,7 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
         bool exit = false;
 	// Variables for the binary search for maximum possible value of K that doesn't generate tiny noise segments.
 	short smallest_noisy_k_found = expected_k+1;
-	short test_expected_k = expected_k/2; 
+	short test_expected_k = DIV_ROUNDUP(expected_k,2); 
 	short delta = test_expected_k/2;
 
         while(!exit) {
@@ -256,13 +256,17 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 				noisy = true;
                         }
                 }
-		if(test_expected_k != 1 && noisy){
+		//if(threadIdx.x == 0)printf("This test_expected_k was %d, noisy status %d", test_expected_k, noisy ? 1 : 0);
+		if(delta == 0 || test_expected_k + delta > max_expected_k){
+			exit = true;
+		}
+		else if(test_expected_k != 1 && noisy){
 			smallest_noisy_k_found = test_expected_k;
                		test_expected_k -= delta;
 		}
 		else{
-			if(smallest_noisy_k_found == test_expected_k + 1){
-				// Exit condition found, the biggest possible k value that's non-noisy.
+			if(test_expected_k == 1 || smallest_noisy_k_found == test_expected_k + 1){
+				// Exit condition found, a wee tiny irriducible segment or the biggest possible k value that's non-noisy.
 				exit = true;
 			}
 			else{
@@ -270,13 +274,14 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 			}
 		}
 		delta = DIV_ROUNDUP(delta,2);
+		//if(threadIdx.x == 0)printf("Next test_expected_k is %d, delta will be %d", test_expected_k, delta);
                 if(exit){
                 	// At this point we can clobber all downaveraged and cumulative cost data in L1 cache variables as we are done with them.
                 	// Let's load the original data series now so the calculations below here will be less affected by latency in most threads.
                 	// TODO: check if the original data is bigger than the L1 space we have available (i.e. a *huge* downaveraging width was applied), and downsample accordingly.
                 	volatile T *orig_data_copy = reinterpret_cast<volatile T *>(downsample_qtype);
                 	if(threadIdx.x*downsample_width+blockIdx.y*raw_samples_per_threadblock < orig_N){
-                        	for(int i = 0; i < downsample_width && threadIdx.x*downsample_width + i < raw_samples_per_threadblock && threadIdx.x*downsample_width + i < N; i++){
+                        	for(int i = 0; i < downsample_width && threadIdx.x*downsample_width + i < raw_samples_per_threadblock && threadIdx.x*downsample_width + i < orig_N; i++){
                                 	orig_data_copy[threadIdx.x*downsample_width+i] = series[threadIdx.x*downsample_width+blockIdx.y*raw_samples_per_threadblock+i];
                         	}
 			}
