@@ -86,6 +86,7 @@ read_text_data(const char *text_file_name, T **output_vals, size_t *num_output_v
   *num_output_vals = n;
   if(n == 0){
     std::cerr << "File " << text_file_name << " is empty or not properly formatted. Skipping." << std::endl;
+	ifs.close();
     return 1;
   }
 
@@ -106,6 +107,7 @@ read_text_data(const char *text_file_name, T **output_vals, size_t *num_output_v
 
   // Only set the output if all the data was succesfully read in.
   *output_vals = out;
+  ifs.close();
   return 0;
 }
 

@@ -281,7 +281,7 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                 	// TODO: check if the original data is bigger than the L1 space we have available (i.e. a *huge* downaveraging width was applied), and downsample accordingly.
                 	volatile T *orig_data_copy = reinterpret_cast<volatile T *>(downsample_qtype);
                 	if(threadIdx.x*downsample_width+blockIdx.y*raw_samples_per_threadblock < orig_N){
-                        	for(int i = 0; i < downsample_width && threadIdx.x*downsample_width + i < raw_samples_per_threadblock && threadIdx.x*downsample_width + i < orig_N; i++){
+                        	for(int i = 0; i < downsample_width && threadIdx.x*downsample_width + i < raw_samples_per_threadblock && threadIdx.x*downsample_width + blockIdx.y*raw_samples_per_threadblock + i < orig_N; i++){
                                 	orig_data_copy[threadIdx.x*downsample_width+i] = series[threadIdx.x*downsample_width+blockIdx.y*raw_samples_per_threadblock+i];
                         	}
 			}
