@@ -600,8 +600,9 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	*barycenter_length = medoidLength;
 }
 
+/* Note that this method may adjust the total number of sequences, so that zero length sequences (after prefix chopping) do not go into the DBA later on. */
 template <typename T>
-__host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix_length, T ***cpu_sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, char *output_prefix, cudaStream_t stream=0){
+__host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix_length, T ***cpu_sequences, int *num_sequences, size_t *sequence_lengths, char **sequence_names, char *output_prefix, cudaStream_t stream=0){
 
         // Send the sequence metadata and data out to all the devices being used.
         int deviceCount;
@@ -612,12 +613,12 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
         cudaMallocHost(&gpu_sequence_lengths, sizeof(size_t **)*deviceCount); CUERR("Allocating GPU memory for array of sequence lengths for chopping");
         for(int currDevice = 0; currDevice < deviceCount; currDevice++){
                 cudaSetDevice(currDevice);
-                cudaMallocManaged(&gpu_sequence_lengths[currDevice], sizeof(size_t)*num_sequences); CUERR("Allocating GPU memory for array of sequence length pointers");
-                cudaMemcpyAsync(gpu_sequence_lengths[currDevice], sequence_lengths, sizeof(size_t)*num_sequences, cudaMemcpyHostToDevice, stream); CUERR("Copying sequence lengths to GPU memory for prefix chopping");
+                cudaMallocManaged(&gpu_sequence_lengths[currDevice], sizeof(size_t)*(*num_sequences)); CUERR("Allocating GPU memory for array of sequence length pointers");
+                cudaMemcpyAsync(gpu_sequence_lengths[currDevice], sequence_lengths, sizeof(size_t)*(*num_sequences), cudaMemcpyHostToDevice, stream); CUERR("Copying sequence lengths to GPU memory for prefix chopping");
         }
 
 	size_t maxLength = 0;
-	for(int i = 0; i < num_sequences; i++){
+	for(int i = 0; i < (*num_sequences); i++){
 		if(sequence_lengths[i] > maxLength){
 			maxLength = sequence_lengths[i];
 		}
@@ -628,9 +629,9 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
         cudaMallocHost(&gpu_sequences, sizeof(T*)*deviceCount); CUERR("Allocating CPU memory for array of device-side sequence pointers");
         for(int currDevice = 0; currDevice < deviceCount; currDevice++){
                 cudaSetDevice(currDevice);
-                cudaMallocManaged(&gpu_sequences[currDevice], sizeof(T)*num_sequences*maxLength); CUERR("Allocating GPU memory for array of sequences");
+                cudaMallocManaged(&gpu_sequences[currDevice], sizeof(T)*(*num_sequences)*maxLength); CUERR("Allocating GPU memory for array of sequences");
                 // Make a GPU copy of the input ragged 2D array as an evenly spaced 1D array for performance
-                for (int i = 0; i < num_sequences; i++) {
+                for (int i = 0; i < *num_sequences; i++) {
                         cudaMemcpyAsync(gpu_sequences[currDevice]+i*maxLength, (*cpu_sequences)[i], sequence_lengths[i]*sizeof(T), cudaMemcpyHostToDevice, stream); CUERR("Copying sequence to GPU memory for prefix chopping");
                 }
         }
@@ -645,10 +646,10 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
                 cudaSetDevice(i);
                 cudaDeviceSynchronize(); CUERR("Synchronizing CUDA device after sequence copy to GPU for chopping");
         }
-        normalizeSequences(gpu_sequences, maxLength, num_sequences, gpu_sequence_lengths, -1, stream); CUERR("Normalizing input sequences for prefix chopping");
+        normalizeSequences(gpu_sequences, maxLength, *num_sequences, gpu_sequence_lengths, -1, stream); CUERR("Normalizing input sequences for prefix chopping");
 	normalizeSequence(gpu_sequence_prefixs, sequence_prefix_length, stream); CUERR("Normalizing sequence prefix for chopping");
 	size_t *chopPositions = 0;
-	cudaMallocHost(&chopPositions, sizeof(size_t)*num_sequences); CUERR("Allocating CPU memory for sequence prefix chopping locations");
+	cudaMallocHost(&chopPositions, sizeof(size_t)*(*num_sequences)); CUERR("Allocating CPU memory for sequence prefix chopping locations");
 
         unsigned int *maxThreads;
         cudaMallocHost(&maxThreads, sizeof(unsigned int)*deviceCount); CUERR("Allocating CPU memory for CUDA device properties");
@@ -682,15 +683,15 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
 	cudaMallocHost(&pathMatrixs, sizeof(unsigned char *)*deviceCount); CUERR("Allocating CPU memory for GPU DTW path matrix pointers");
 	// Record how many hits there are to each position in the leader in each input sequence.
         int **leaderPathHistograms = 0;
-	cudaMallocHost(&leaderPathHistograms, sizeof(int **)*num_sequences); CUERR("Allocating CPU memory for leader path histogram pointers");
-	for(int i = 0; i < num_sequences; i++){	 
+	cudaMallocHost(&leaderPathHistograms, sizeof(int **)*(*num_sequences)); CUERR("Allocating CPU memory for leader path histogram pointers");
+	for(int i = 0; i < *num_sequences; i++){	 
 		cudaMallocHost(&leaderPathHistograms[i], sizeof(int)*sequence_prefix_length); CUERR("Allocating CPU memory for a leader path histogram");
 	}
-        for(size_t seq_swath_start = 0; seq_swath_start < num_sequences; seq_swath_start += deviceCount){
+        for(size_t seq_swath_start = 0; seq_swath_start < *num_sequences; seq_swath_start += deviceCount){
 
 		for(int currDevice = 0; currDevice < deviceCount; currDevice++){
 			size_t seq_index = seq_swath_start + currDevice;
-			if(seq_index >= num_sequences){
+			if(seq_index >= *num_sequences){
 				break;
 			}
 			cudaSetDevice(currDevice);
@@ -724,7 +725,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
 		}
        	        for(int currDevice = 0; currDevice < deviceCount; currDevice++){
 			size_t seq_index = seq_swath_start + currDevice;
-			if(seq_index >= num_sequences){
+			if(seq_index >= *num_sequences){
 				break;
 			}
 			cudaSetDevice(currDevice); CUERR("Setting active device for DTW path matrix results");
@@ -783,29 +784,42 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
 
 	// We're going to have to free the incoming sequences once we've chopped them down and made a new more compact copy.
 	std::ofstream chop((std::string(output_prefix)+std::string(".prefix_chop.txt")).c_str());
-	for(int i = 0; i < num_sequences; i++){
-		size_t chopped_seq_length = sequence_lengths[i] - chopPositions[i];
-		if(chopped_seq_length == 0){
-			// TODO: remove from the inputs entirely as there is nothing left? 
-			continue;
-		}
-		T *new_seq = 0;
-		cudaMallocHost(&new_seq, sizeof(T)*chopped_seq_length); CUERR("Allocating host memory for chopped sequence pointers");
-		T *chopped_seq_start = (*cpu_sequences)[i]+chopPositions[i];
-		if(memcpy(new_seq, chopped_seq_start, sizeof(T)*chopped_seq_length) != new_seq){
-                	std::cerr << "Running memcpy to copy prefix chopped sequence failed";
-                	exit(CANNOT_COPY_PREFIX_CHOPPED_SEQ);
-        	}
-		chop << sequence_names[i] << "\t" << chopPositions[i] << "\t" << sequence_lengths[i];
-		int *leaderPathHistogram = leaderPathHistograms[i];
+	int num_zero_length_sequences_skipped = 0;
+	for(int i = 0; i < *num_sequences; i++){
+		chop << sequence_names[i] << "\t" << chopPositions[i+num_zero_length_sequences_skipped] << "\t" << sequence_lengths[i];
+		int *leaderPathHistogram = leaderPathHistograms[i+num_zero_length_sequences_skipped];
 		for(int j = 0; j < sequence_prefix_length; j++){
 			chop << "\t" << leaderPathHistogram[j];
 		}
 		chop << std::endl;
+
+		size_t chopped_seq_length = sequence_lengths[i] - chopPositions[i+num_zero_length_sequences_skipped];
+
+		// Remove from the inputs entirely as there is nothing left.
+		if(chopped_seq_length == 0){
+			std::cerr << "Skipping " << sequence_names[i] << " due to zero-length after prefix chopping" << std::endl;
+			cudaFreeHost(leaderPathHistograms[i+num_zero_length_sequences_skipped]); CUERR("Freeing a leader path histogram array on host for zer-length sequence after prefix chop");
+			num_zero_length_sequences_skipped++;
+			for(int j = i+1; j < *num_sequences; j++){
+				sequence_names[j-1] = sequence_names[j];
+				cpu_sequences[j-1] = cpu_sequences[j];
+				sequence_lengths[j-1] = sequence_lengths[j];
+			}
+			(*num_sequences)--;
+			i--;
+			continue;
+		}
+		T *new_seq = 0;
+		cudaMallocHost(&new_seq, sizeof(T)*chopped_seq_length); CUERR("Allocating host memory for chopped sequence pointers");
+		T *chopped_seq_start = (*cpu_sequences)[i]+chopPositions[i+num_zero_length_sequences_skipped];
+		if(memcpy(new_seq, chopped_seq_start, sizeof(T)*chopped_seq_length) != new_seq){
+                	std::cerr << "Running memcpy to copy prefix chopped sequence failed";
+                	exit(CANNOT_COPY_PREFIX_CHOPPED_SEQ);
+        	}
 		cudaFreeHost((*cpu_sequences)[i]); CUERR("Freeing original sequence pointer on host");
 		(*cpu_sequences)[i] = new_seq;
 		sequence_lengths[i] = chopped_seq_length;
-		cudaFreeHost(leaderPathHistograms[i]); CUERR("Freeing a leader path histogram array on host");
+		cudaFreeHost(leaderPathHistograms[i+num_zero_length_sequences_skipped]); CUERR("Freeing a leader path histogram array on host");
 	}
 	chop.close();
 

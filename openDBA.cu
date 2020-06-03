@@ -68,7 +68,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
                                      " data from " << seqprefix_file_name << ", aborting" << std::endl;
 			exit(CANNOT_READ_SEQUENCE_PREFIX_FILE);
 		}
-		chopPrefixFromSequences<T>(*seqprefix, *seqprefix_length, &sequences, actual_num_series, sequence_lengths, series_file_names, output_prefix);
+		chopPrefixFromSequences<T>(*seqprefix, *seqprefix_length, &sequences, &actual_num_series, sequence_lengths, series_file_names, output_prefix);
 		cudaFreeHost(*seqprefix); CUERR("Freeing CPU memory for the prefix sequence");
 		cudaFreeHost(seqprefix); CUERR("Freeing CPU memory for the prefix sequencers pointer");
 		cudaFreeHost(seqprefix_length); CUERR("Freeing CPU memory for the prefix sequence length");
