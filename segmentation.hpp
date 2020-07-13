@@ -301,6 +301,7 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                                 	right_boundary = N;
                         	}
 				
+				__syncthreads(); // so all the data for any given segment is in plac/Users/gordonp/Downloads e before we sort
                         	// Bubble sort the L1 cache values for each segment in place so we can run this quickly and easily get the median for each segment.
                         	int left_boundary = (breakpoints[threadIdx.x-1])*downsample_width;
                         	for(int i = left_boundary; i < right_boundary-1; ++i){ // +1 as starting point as left boundary is non-inclusive.
