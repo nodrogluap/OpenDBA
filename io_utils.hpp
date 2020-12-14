@@ -33,29 +33,34 @@ writeSequences(T **cpu_sequences, size_t *seq_lengths, char **seq_names, int num
 	return 0;
 }
 
+template<typename T>
 __host__
-int writeDTWPathMatrix(unsigned char *um_pathMatrix, const char *filename, size_t num_columns, size_t num_rows, size_t pathPitch){
+int writeDTWPathMatrix(unsigned char **cpu_stepMatrix, unsigned char *um_pathMatrix, const char *step_filename, size_t num_columns, size_t num_rows, size_t pathPitch){
 
-	unsigned char *cpu_pathMatrix = 0;
-        cudaMallocHost(&cpu_pathMatrix, sizeof(unsigned char)*pathPitch*(num_rows)); CUERR("Allocating CPU memory for path matrix");
+	
+	//T *cpu_costMatrix = 0;
+	
+	std::ofstream step(step_filename);
+	if(!step.is_open()){
+		std::cerr << "Cannot write to " << step_filename << std::endl;
+		return CANNOT_WRITE_DTW_PATH_MATRIX;
+	}	
+	
+	cudaMallocHost(cpu_stepMatrix, sizeof(unsigned char)*pathPitch*(num_rows+1)); CUERR("Allocating CPU memory for step matrix");
 	// Copy the data from unified memory (could be GPU or CPU)
-        cudaMemcpy(cpu_pathMatrix, um_pathMatrix, sizeof(unsigned char)*pathPitch*(num_rows), cudaMemcpyDeviceToHost);  CUERR("Copying GPU to CPU memory for path matrix");
-
-	std::ofstream out(filename);
-        if(!out.is_open()){
-                std::cerr << "Cannot write to " << filename << std::endl;
-                return CANNOT_WRITE_DTW_PATH_MATRIX;
-        }
-
+	cudaMemcpy((*cpu_stepMatrix), um_pathMatrix, sizeof(unsigned char)*pathPitch*(num_rows+1), cudaMemcpyDeviceToHost);  CUERR("Copying GPU to CPU memory for step matrix");
+	
 	for(int i = 0; i < num_rows; i++){
-	        for(int j = 0; j < num_columns; j++){
-	                unsigned char move = cpu_pathMatrix[pitchedCoord(j,i,pathPitch)];
-	                out << (move == DIAGONAL ? "D" : (move == RIGHT ? "R" : (move == UP ? "U" : (move == OPEN_RIGHT ?  "O" : (move == NIL || move == NIL_OPEN_RIGHT ? "N" : "?")))));
-	        }
-	        out << std::endl;
+		for(int j = 0; j < num_columns; j++){
+			unsigned char move = (*cpu_stepMatrix)[pitchedCoord(j,i,pathPitch)];
+			step << (move == DIAGONAL ? "D" : (move == RIGHT ? "R" : (move == UP ? "U" : (move == OPEN_RIGHT ?  "O" : (move == NIL || move == NIL_OPEN_RIGHT ? "N" : "?")))));
+		}
+		step << std::endl;
 	}
-	out.close();
-	cudaFreeHost(cpu_pathMatrix);
+	step.close();
+	
+	// cudaFreeHost(cpu_stepMatrix);
+	//cudaFreeHost(cpu_costMatrix);
 	return 0;
 }
 

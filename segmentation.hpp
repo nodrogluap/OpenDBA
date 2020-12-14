@@ -370,7 +370,7 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
         	total_expected_segments += (*segmented_seq_lengths)[i];
 
     		// Asynchronously slurp each query into device memory for maximum PCIe bus transfer rate efficiency from CPU to the GPU via the Copy Engine, or lazy copy in managed memory. 
-    		cudaMalloc(&rawseq_ptrs[i], sizeof(T)*seq_lengths[i]);   CUERR("Allocating GPU memory for segmenting raw input sequence");
+    		cudaMallocHost(&rawseq_ptrs[i], sizeof(T)*seq_lengths[i]);   CUERR("Allocating GPU memory for segmenting raw input sequence");
     		cudaMemcpyAsync(rawseq_ptrs[i], sequences[i], sizeof(T)*seq_lengths[i], cudaMemcpyHostToDevice, stream);          CUERR("Launching raw query copy to managed memory for segmentation");
 	}
 	cudaMemcpyAsync(gpu_rawseqs, rawseq_ptrs, sizeof(T *)*num_seqs, cudaMemcpyHostToDevice, stream); CUERR("Launching raw query pointer array copy from CPU to GPU for segmentation");

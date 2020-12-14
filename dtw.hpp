@@ -38,7 +38,7 @@ __device__ T* shared_memory_proxy() {
 template<typename T>
 __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_input_length, const T *second_seq_input, const size_t second_seq_input_length, const size_t first_seq_index, 
                             const size_t offset_within_second_seq, const T *gpu_sequences, const size_t maxSeqLength, const size_t num_sequences, const size_t *gpu_sequence_lengths, 
-                            T *dtwCostSoFar, unsigned char *pathMatrix, const size_t pathMemPitch, T *dtwPairwiseDistances, const int use_open_start, const int use_open_end){
+                            T *dtwCostSoFar, T *newDtwCostSoFar, unsigned char *pathMatrix, const size_t pathMemPitch, T *dtwPairwiseDistances, const int use_open_start, const int use_open_end){
 	// We need temporary storage for three rows of the cost matrix to calculate the optimal path steps as a diagonal "wavefront" until we iterate 
 	// through every position of the first sequence.
 	T *costs = shared_memory_proxy<T>();
@@ -59,6 +59,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 
 	// Each thread will be using the same second sequence value throughout the rest of the kernel, so store it as a local variable for efficiency.
 	const T second_seq_thread_val = offset_within_second_seq+threadIdx.x >= second_seq_length ? 0 : second_seq[offset_within_second_seq+threadIdx.x];
+	// printf("offset_within_second_seq: %i, second_seq_thread_val: %f\n", offset_within_second_seq, second_seq_thread_val);
 
 	// Possible shortcut: If we are allowing open right moves only at the end of the alignment, 
 	// and the top row of the matrix is in that state, and it's the lowest cost option in this column
@@ -129,18 +130,19 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 			}
 		}
 		costs[0] += use_open_start ? 0 : (first_seq_start_val-second_seq_thread_val)*(first_seq_start_val-second_seq_thread_val);
-		int i;
-		for(i = 1; i < blockDim.x && offset_within_second_seq+i < second_seq_length; i++){
-			T diff = use_open_start ? 0 : first_seq_start_val-second_seq[offset_within_second_seq+i];
-			costs[i+blockDim.x*(i%3)] = costs[(i-1)+blockDim.x*((i-1)%3)]+diff*diff;
+		int col;
+		for(col = 1; col < blockDim.x && offset_within_second_seq+col < second_seq_length; col++){
+			T diff = use_open_start ? 0 : first_seq_start_val-second_seq[offset_within_second_seq+col];
+			costs[col] = costs[(col-1)+blockDim.x*((col-1)%3)]+diff*diff;	// Offset here is for row 0. Not circulating the cost buffer
 			if(pathMatrix != 0){
-				pathMatrix[pitchedCoord(offset_within_second_seq+i,0,pathMemPitch)] = use_open_start ? OPEN_RIGHT : RIGHT;
+				pathMatrix[pitchedCoord(offset_within_second_seq+col,0,pathMemPitch)] = use_open_start ? OPEN_RIGHT : RIGHT;
 			}
 		}
-		dtwCostSoFar[0] = costs[(i-1)+blockDim.x*((i-1)%3)];
+		newDtwCostSoFar[0] = costs[(col-1)];
 	}
-
-	for(int i = 1; i < first_seq_length+blockDim.x; i++){
+	
+	int i; // Indicates the diagonal of the wave front cost values being calculated
+	for(i = 1; i < first_seq_length+blockDim.x; i++){
 
 		if(offset_within_second_seq+threadIdx.x < second_seq_length && // We're within the sequence bounds?
 		   threadIdx.x < i &&                                          // The diff still corresponds to a spot in the cost matrix?
@@ -182,38 +184,43 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 				right_cost = costs[(threadIdx.x-1)+blockDim.x*((i-1)%3)];
 				used_open_right_end_cost = 1;
 			}
+			// char move;
 			if(diag_cost > up_cost){
 				if(up_cost > right_cost){
 					costs[threadIdx.x+blockDim.x*(i%3)] = right_cost;
 					if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = used_open_right_end_cost ? OPEN_RIGHT : RIGHT;}
+					// move = 'R';
 				}
 				else{
 					costs[threadIdx.x+blockDim.x*(i%3)] = up_cost;
 					if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = UP;}
+					// move = 'U';
 				}
 			}
 			else{
 				if(diag_cost > right_cost){
 					costs[threadIdx.x+blockDim.x*(i%3)] = right_cost;
                                         if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = used_open_right_end_cost ? OPEN_RIGHT : RIGHT;}
+					// move = 'R';
 				}
 				else{
 					costs[threadIdx.x+blockDim.x*(i%3)] = diag_cost;
 					if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = DIAGONAL;}
+					// move = 'D';
 				}
 			}
-
+			// if(first_seq_index == 0) printf("0, %i, %hi, %f, %f, %f, %f, %c\n", i, threadIdx.x, up_cost, right_cost, diag_cost, diff*diff, move);
+			// if(first_seq_index == 1) printf("1, %i, %hi, %f, %f, %f, %f, %c\n", i, threadIdx.x, up_cost, right_cost, diag_cost, diff*diff, move);
 			// Right edge is a special case as we need to store back out intermediate result to global mem
 			// for the use of the next kernel call with a larger offset_within_second_seq.
 			if(threadIdx.x == blockDim.x-1 || offset_within_second_seq+threadIdx.x == second_seq_length - 1){
-				dtwCostSoFar[i-threadIdx.x] = costs[threadIdx.x+blockDim.x*(i%3)];
+				newDtwCostSoFar[i-threadIdx.x] = costs[threadIdx.x+blockDim.x*(i%3)];
 			}
 		}
 
 		// To ensure all required previous costs from neighbouring threads are calculated and available for the next iteration.
 		__syncthreads();
 	}
-
 	// If this is the end of the second sequence, we now know the total cost of the alignment and can populate 
 	// global var dtwPairwiseDistances. This is more efficient than doing a round trip on the PCI bus to the CPU for the same purpose.
 	if(offset_within_second_seq+blockDim.x >= second_seq_length){
@@ -222,7 +229,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 			dtwPairwiseDistances[ARITH_SERIES_SUM(num_sequences-1)-ARITH_SERIES_SUM(num_sequences-first_seq_index-1)+blockIdx.x] = (T) sqrtf(dtwCostSoFar[first_seq_length-1]);
 		}
 	}
-
+	
 }
 
 #endif

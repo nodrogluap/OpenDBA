@@ -90,8 +90,9 @@ read_text_data(const char *text_file_name, T **output_vals, size_t *num_output_v
     return 1;
   }
 
-  T *out = 0;
-  cudaMallocHost(&out, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from text file");
+  // T *out = 0;
+  // cudaMallocHost(&out, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from text file");
+  cudaMallocHost(output_vals, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from text file");
   
   // Read the actual values
   ifs.clear(); // get rid of EOF error state
@@ -101,12 +102,13 @@ read_text_data(const char *text_file_name, T **output_vals, size_t *num_output_v
   int i = 0;
   while(n--){  // Read line by line
     std::getline(ifs, line); in.str(line);
-    in >> out[i++];      // Read the first whitespace-separated token
+    // in >> out[i++];      // Read the first whitespace-separated token
+    in >> (*output_vals)[i++];      // Read the first whitespace-separated token
     in.clear(); // to reuse the stringatream parser
   }
 
   // Only set the output if all the data was succesfully read in.
-  *output_vals = out;
+  // *output_vals = out;
   ifs.close();
   return 0;
 }

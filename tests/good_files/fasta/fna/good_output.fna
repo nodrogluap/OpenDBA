@@ -1,0 +1,12 @@
+>chrI kept_len=16 prefix_len=13 suffix_len=5
+CCAGTTGTGTGTACTA
+>chrII kept_len=16 prefix_len=13 suffix_len=5
+CCAGTTGTGTGTATTA
+>chrIII kept_len=8 prefix_len=5 suffix_len=5
+CCAGTGTG
+>chrVI kept_len=5 prefix_len=2 suffix_len=16
+CCTAT
+>chrIV kept_len=6 prefix_len=3 suffix_len=9
+GTAGTA
+>chrV kept_len=6 prefix_len=3 suffix_len=9
+GTAATG
