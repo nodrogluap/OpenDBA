@@ -226,7 +226,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 	if(offset_within_second_seq+blockDim.x >= second_seq_length){
 		if(dtwPairwiseDistances != 0 && threadIdx.x == 0){
 			// 1D index for row into distances upper left pairs triangle is the total size of the triangle, minus all those that haven't been processed yet. 
-			dtwPairwiseDistances[ARITH_SERIES_SUM(num_sequences-1)-ARITH_SERIES_SUM(num_sequences-first_seq_index-1)+blockIdx.x] = (T) sqrtf(dtwCostSoFar[first_seq_length-1]);
+			dtwPairwiseDistances[ARITH_SERIES_SUM(num_sequences-1)-ARITH_SERIES_SUM(num_sequences-first_seq_index-1)+blockIdx.x] = (T) sqrtf(newDtwCostSoFar[first_seq_length-1]);
 		}
 	}
 	
