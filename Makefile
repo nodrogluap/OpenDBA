@@ -32,7 +32,7 @@ multithreading.o: multithreading.cpp
 fastcluster.o: fastcluster.cpp
 	nvcc -DNO_INCLUDE_FENV -c $< -o $@ 
 
-openDBA.o: openDBA.cu segmentation.hpp cpu_utils.hpp gpu_utils.hpp io_utils.hpp exit_codes.hpp dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
+openDBA.o: openDBA.cu openDBA.cuh segmentation.hpp cpu_utils.hpp gpu_utils.hpp io_utils.hpp exit_codes.hpp dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
 	nvcc -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
 
 $(PROGNAME): Makefile openDBA.o multithreading.o fastcluster.o

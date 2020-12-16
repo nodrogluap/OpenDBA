@@ -1,0 +1,12 @@
+>seq1 kept_len=21 prefix_len=18 suffix_len=4
+AAGCTTTTGCCCAGTCAAGCT
+>seq2 kept_len=21 prefix_len=18 suffix_len=4
+AAGCTTTTGCCCAGTCAAAAA
+>seq3 kept_len=20 prefix_len=17 suffix_len=5
+AAGCTTTTGCCCAGTCATAA
+>seq4 kept_len=8 prefix_len=5 suffix_len=11
+AAGCTATT
+>seq5 kept_len=4 prefix_len=1 suffix_len=10
+GCTT
+>seq6 kept_len=4 prefix_len=1 suffix_len=10
+GTTT

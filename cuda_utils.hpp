@@ -3,7 +3,9 @@
 
 #define CUDA_THREADBLOCK_MAX_L1CACHE 48000
 // Note that you should not change this to >1028 unless you carefully review all the code for reduction steps that imply 32x32 map-reduce!
+#ifndef CUDA_THREADBLOCK_MAX_THREADS
 #define CUDA_THREADBLOCK_MAX_THREADS 1024
+#endif
 #define CUDA_WARP_WIDTH 32
 #define CUERR(MSG) { cudaError_t err; \
     if ((err = cudaGetLastError()) != cudaSuccess) { \

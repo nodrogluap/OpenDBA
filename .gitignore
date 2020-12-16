@@ -2,13 +2,22 @@
 *.o
 *.so
 *.obj
+tests/*.o
 
 # Executables
 *.exe
 *.out
+openDBA
+tests/costmatrix*
+tests/stepmatrix*
+tests/openDBA_test
+tests/path*
 
 # lib files
 *.lib
 
 # exp files
 *.exp
+
+# txt files
+tests/*.txt
