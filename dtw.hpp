@@ -39,7 +39,7 @@ template<typename T>
 __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_input_length, const T *second_seq_input, const size_t second_seq_input_length, const size_t first_seq_index, 
                             const size_t offset_within_second_seq, const T *gpu_sequences, const size_t maxSeqLength, const size_t num_sequences, const size_t *gpu_sequence_lengths, 
                             T *dtwCostSoFar, T *newDtwCostSoFar, unsigned char *pathMatrix, const size_t pathMemPitch, T *dtwPairwiseDistances, const int use_open_start, const int use_open_end){
-	// We need temporary storage for three rows of the cost matrix to calculate the optimal path steps as a diagonal "wavefront" until we iterate 
+	// We need temporary storage for three diagonals of the wavefront calculation of the cost matrix to calculate the optimal path steps as a diagonal "wavefront" until we iterate 
 	// through every position of the first sequence.
 	T *costs = shared_memory_proxy<T>();
 
@@ -56,6 +56,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 
 	// Point to the correct spot in global memory where the costs are being stored.
 	dtwCostSoFar = &dtwCostSoFar[first_seq_length*blockIdx.x];
+	newDtwCostSoFar = &newDtwCostSoFar[first_seq_length*blockIdx.x];
 
 	// Each thread will be using the same second sequence value throughout the rest of the kernel, so store it as a local variable for efficiency.
 	const T second_seq_thread_val = offset_within_second_seq+threadIdx.x >= second_seq_length ? 0 : second_seq[offset_within_second_seq+threadIdx.x];
@@ -68,7 +69,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 	// eating up the subject to get to the upper right corner of the DTW matrix without any additional cost.
 	// This will speed up prefix searches in particular, where the prefix (1st seq) length is a small proportion of the 2nd's.
 	// We don't even need to be keeping the pathMatrix to know we are in that state, because it's the overriding move choice (see used_open_right_end_cost below)
-	// when you're at the top of the marix in open end mode.
+	// when you're at the top of the matrix in open end mode.
 	if(offset_within_second_seq > first_seq_length && use_open_end && !use_open_start){
 		// Check if the search has already been abrogated by a previous kernel call (further left in the DTW matrix calculation) 
 		if(dtwCostSoFar[0] == numeric_limits<T>::max()){
