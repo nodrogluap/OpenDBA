@@ -134,7 +134,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 		int col;
 		for(col = 1; col < blockDim.x && offset_within_second_seq+col < second_seq_length; col++){
 			T diff = use_open_start ? 0 : first_seq_start_val-second_seq[offset_within_second_seq+col];
-			costs[col] = costs[(col-1)+blockDim.x*((col-1)%3)]+diff*diff;	// Offset here is for row 0. Not circulating the cost buffer
+			costs[col+blockDim.x*(col%3)] = costs[(col-1)+blockDim.x*((col-1)%3)]+diff*diff;
 			if(pathMatrix != 0){
 				pathMatrix[pitchedCoord(offset_within_second_seq+col,0,pathMemPitch)] = use_open_start ? OPEN_RIGHT : RIGHT;
 			}
@@ -142,7 +142,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 		newDtwCostSoFar[0] = costs[(col-1)];
 	}
 	
-	int i; // Indicates the diagonal of the wave front cost values being calculated
+	int i; // Indicates the ordinal of the diagonal of the wave front cost values being calculated
 	for(i = 1; i < first_seq_length+blockDim.x; i++){
 
 		if(offset_within_second_seq+threadIdx.x < second_seq_length && // We're within the sequence bounds?
