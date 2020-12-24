@@ -59,8 +59,7 @@ fastcluster.o: ../fastcluster.cpp
 	nvcc -DNO_INCLUDE_FENV -c $< -o $@ 
 
 openDBA.o: openDBA_test.cu ../openDBA.cuh ../segmentation.hpp ../cpu_utils.hpp ../gpu_utils.hpp ../io_utils.hpp ../exit_codes.hpp ../dtw.hpp ../dba.hpp ../limits.hpp ../cuda_utils.hpp
-	nvcc -std=c++11 -DDEBUG=$(DEBUG) -DCUDA_THREADBLOCK_MAX_THREADS=4 -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
-
+	nvcc -std=c++11 -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
+	
 openDBA_test: openDBA_test.cu Makefile openDBA.o multithreading.o fastcluster.o
-	nvcc --std=c++11 $(NVCC_FLAGS) --compiler-options -fPIC openDBA.o multithreading.o fastcluster.o -o openDBA_test
-
+	nvcc -std=c++11 $(NVCC_FLAGS) --compiler-options -fPIC openDBA.o multithreading.o fastcluster.o -o openDBA_test

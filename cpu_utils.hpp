@@ -70,47 +70,47 @@ template <typename T>
 int
 read_text_data(const char *text_file_name, T **output_vals, size_t *num_output_vals){
 
-  // Count the number of lines in the file (buffering 1MB on read for speed) so we know how much space to allocate for output_vals
-  std::ios::sync_with_stdio(false); //optimization
-  const int SZ = 1024 * 1024;
-  std::vector <char> read_buffer( SZ );
-  std::ifstream ifs(text_file_name); 
-  if(!ifs){
-    std::cerr << "Error reading in file " << text_file_name << ", skipping" << std::endl;
-    return 1;
-  }
-  int n = 0;
-  while(int sz = FileRead(ifs, read_buffer)) {
-    n += CountLines(read_buffer, sz);
-  }
-  *num_output_vals = n;
-  if(n == 0){
-    std::cerr << "File " << text_file_name << " is empty or not properly formatted. Skipping." << std::endl;
-	ifs.close();
-    return 1;
-  }
+	// Count the number of lines in the file (buffering 1MB on read for speed) so we know how much space to allocate for output_vals
+	// std::ios::sync_with_stdio(false); //optimization
+	const int SZ = 1024 * 1024;
+	std::vector <char> read_buffer( SZ );
+	std::ifstream ifs(text_file_name); 
+	if(!ifs){
+		std::cerr << "Error reading in file " << text_file_name << ", skipping" << std::endl;
+		return 1;
+	}
+	int n = 0;
+	while(int sz = FileRead(ifs, read_buffer)) {
+		n += CountLines(read_buffer, sz);
+	}
+	*num_output_vals = n;
+	if(n == 0){
+		std::cerr << "File " << text_file_name << " is empty or not properly formatted. Skipping." << std::endl;
+		ifs.close();
+		return 1;
+	}
 
-  // T *out = 0;
-  // cudaMallocHost(&out, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from text file");
-  cudaMallocHost(output_vals, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from text file");
+	// T *out = 0;
+	// cudaMallocHost(&out, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from text file");
+	cudaMallocHost(output_vals, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from text file");
   
-  // Read the actual values
-  ifs.clear(); // get rid of EOF error state
-  ifs.seekg(0, std::ios::beg);
-  std::stringstream in;      // Make a stream for the line itself
-  std::string line;
-  int i = 0;
-  while(n--){  // Read line by line
-    std::getline(ifs, line); in.str(line);
-    // in >> out[i++];      // Read the first whitespace-separated token
-    in >> (*output_vals)[i++];      // Read the first whitespace-separated token
-    in.clear(); // to reuse the stringatream parser
-  }
+	// Read the actual values
+	ifs.clear(); // get rid of EOF error state
+	ifs.seekg(0, std::ios::beg);
+	std::stringstream in;      // Make a stream for the line itself
+	std::string line;
+	int i = 0;
+	while(n--){  // Read line by line
+		std::getline(ifs, line); in.str(line);
+		// in >> out[i++];      // Read the first whitespace-separated token
+		in >> (*output_vals)[i++];      // Read the first whitespace-separated token
+		in.clear(); // to reuse the stringatream parser
+	}
 
-  // Only set the output if all the data was succesfully read in.
-  // *output_vals = out;
-  ifs.close();
-  return 0;
+	// Only set the output if all the data was succesfully read in.
+	// *output_vals = out;
+	ifs.close();
+	return 0;
 }
 
 #if HDF5_SUPPORTED == 1

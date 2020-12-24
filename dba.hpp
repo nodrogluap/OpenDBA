@@ -99,7 +99,7 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 	for(size_t seq_index = 0; seq_index < num_sequences-1; seq_index++){
 		int currDevice = seq_index%deviceCount;
 		cudaSetDevice(currDevice);
-#if DEBUG == 1
+#ifdef DEBUG
 		// When debugging, kernel calls take more resources and running the full complement of threads causes runtime kernel launch failures.
         	dim3 threadblockDim(maxThreads[currDevice]/4, 1, 1);
 #else
@@ -168,7 +168,7 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 	// TODO: use a fancy cleanup thread barrier here so that multiple DBAs could be running on the same device and not interfere with each other at this step.
 	for(int i = 0; i < deviceCount; i++){
                 cudaSetDevice(i);
-		cudaDeviceSynchronize(); CUERR("Synchronizing CUDA device after all DTW calculations for initial medoid finding");
+		cudaDeviceSynchronize(); CUERR("Synchronizing CUDA device after all DTW calculations");
 	}
 
 	T *dtwSoS;
@@ -212,14 +212,18 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
         }
 	mats << "0" << std::endl;
 
-	// Pick the smallest squared distance across all the sequences.
 	int medoidIndex = -1;
-	T lowestSoS = std::numeric_limits<T>::max();
-	for(size_t i = 0; i < num_sequences-1; ++i){
-		if (dtwSoS[i] < lowestSoS) {
-			medoidIndex = i;
-			lowestSoS = dtwSoS[i];
+	// Pick the smallest squared distance across all the sequences.
+	if(num_sequences < 2){
+		T lowestSoS = std::numeric_limits<T>::max();
+		for(size_t i = 0; i < num_sequences-1; ++i){
+			if (dtwSoS[i] < lowestSoS) {
+				medoidIndex = i;
+				lowestSoS = dtwSoS[i];
+			}
 		}
+	} else{	// Pick the longest sequence that contributed to the cumulative distance if we only have 2 sequences
+		medoidIndex = sequence_lengths[0] > sequence_lengths[1] ? 0 : 1;
 	}
 
 	cudaFreeHost(dtwSoS); CUERR("Freeing CPU memory for DTW pairwise distance sum of squares");
@@ -303,9 +307,10 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
         // unsigned int maxThreads = deviceProp.maxThreadsPerBlock;
         unsigned int maxThreads = CUDA_THREADBLOCK_MAX_THREADS;
 
-	unsigned int *nElementsForMean;
+	unsigned int *nElementsForMean, *cpu_nElementsForMean;
 	cudaMallocManaged(&nElementsForMean, sizeof(unsigned int)*centerLength); CUERR("Allocating GPU memory for barycenter update sequence pileup");
 	cudaMemset(nElementsForMean, 0, sizeof(unsigned int)*centerLength); CUERR("Initialzing GPU memory for barycenter update sequence pileup to zero");
+	cudaMallocHost(&cpu_nElementsForMean, sizeof(unsigned int)*centerLength); CUERR("Allocating CPU memory for barycenter sequence pileup");
 
         int priority_high, priority_low, descendingPriority;
         cudaDeviceGetStreamPriorityRange(&priority_low, &priority_high);
@@ -317,11 +322,7 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 	std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
 	char spinner[4] = { '|', '/', '-', '\\'};
         for(size_t seq_index = 0; seq_index <= num_sequences-1; seq_index++){
-#if DEBUG == 1
                 dim3 threadblockDim(maxThreads/4, 1, 1);
-#else
-		dim3 threadblockDim(maxThreads, 1, 1);
-#endif
                 size_t current_seq_length = sequence_lengths[seq_index];
                 // We are allocating each time rather than just once at the start because if the sequences have a large
                 // range of lengths and we sort them from shortest to longest we will be allocating the minimum amount of
@@ -430,6 +431,32 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 		
 		writeDTWPathMatrix<T>(&cpu_stepMatrix, pathMatrix, step_filename.c_str(), columnLimit, rowLimit, pathPitch);
 		
+		/*
+		// Cut this out and move new file write to writeDTWPathMatrix in io_utils.hpp
+		unsigned char *cpu_stepMatrix = 0;
+		T *cpu_costMatrix = 0;
+		std::ofstream step((std::string("stepmatrix")+std::to_string(seq_index)).c_str());
+		std::ofstream cost((std::string("costmatrix")+std::to_string(seq_index)).c_str());
+		
+		cudaMallocHost(&cpu_stepMatrix, sizeof(unsigned char)*pathPitch*(rowLimit+1));
+		cudaMemcpy(cpu_stepMatrix, pathMatrix, sizeof(unsigned char)*pathPitch*(rowLimit+1), cudaMemcpyDeviceToHost);
+		
+		cudaMallocHost(&cpu_costMatrix, sizeof(T)*pathPitch*(rowLimit+1));
+		cudaMemcpy(cpu_costMatrix, dtwCostSoFar, sizeof(T)*pathPitch*(rowLimit+1), cudaMemcpyDeviceToHost);
+		for(int i = 0; i <= rowLimit; i++){
+			for(int j = 0; j <= columnLimit; j++){
+				char move = cpu_stepMatrix[pitchedCoord(j,i,pathPitch)];
+				T cost_val = cpu_costMatrix[pitchedCoord(j,i,pathPitch)];
+				step << (move == DIAGONAL ? "D" : (move == RIGHT ? "R" : (move == UP ? "U" : (move==OPEN_RIGHT ?  "O" : (move ==NIL ? "N" : "?")))));
+				cost << cost_val << " ";
+			}
+			step << std::endl;
+			cost << std::endl;
+		}
+		step.close();
+		cost.close();
+		*/
+		
 		std::ofstream path((std::string("path")+std::to_string(seq_index)).c_str());
 		if(!path.is_open()){
 			std::cerr << "Cannot write to path" << seq_index << std::endl;
@@ -470,14 +497,16 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 	// TODO: use a fancy cleanup thread barrier here so that multiple DBAs could be running on the same device and not interfere with each other at this step.
         cudaDeviceSynchronize(); CUERR("Synchronizing CUDA device after all DTW calculations");
 
+	cudaMemcpy(cpu_nElementsForMean, nElementsForMean, sizeof(T)*centerLength, cudaMemcpyDeviceToHost); CUERR("Copying barycenter update sequence pileup from GPU to CPU");
 	cudaMemcpy(updatedMean, gpu_centroidAlignmentSums, sizeof(T)*centerLength, cudaMemcpyDeviceToHost); CUERR("Copying barycenter update sequence element sums from GPU to CPU");
 	cudaStreamSynchronize(stream);  CUERR("Synchronizing CUDA stream before computing centroid mean");
 	for (int t = 0; t < centerLength; t++) {
-		//std::cout << t << "\t" << updatedMean[t] << "\t" << nElementsForMean[t] << std::endl;
-		updatedMean[t] /= nElementsForMean[t];
+		//std::cout << t << "\t" << updatedMean[t] << "\t" << cpu_nElementsForMean[t] << std::endl;
+		updatedMean[t] /= cpu_nElementsForMean[t];
 	}
 	cudaFree(gpu_centroidAlignmentSums); CUERR("Freeing GPU memory for the barycenter update sequence element sums");
 	cudaFree(nElementsForMean); CUERR("Freeing GPU memory for the barycenter update sequence pileup");
+	cudaFreeHost(cpu_nElementsForMean);  CUERR("Freeing CPU memory for the barycenter update sequence pileup");
 
 	// Calculate the difference between the old and new barycenter.
 	// Convergence is defined as when all points in the old and new differ by less than a 
