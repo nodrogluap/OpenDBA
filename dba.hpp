@@ -511,7 +511,7 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 	// Calculate the difference between the old and new barycenter.
 	// Convergence is defined as when all points in the old and new differ by less than a 
 	// given delta (relative to std dev since every sequence is Z-normalized), so return the max point delta.
-	double max_delta = 0.0;
+	double max_delta = (double) 0.0f;
 	for(int t = 0; t < centerLength; t++) {
 		double delta = std::abs((double) (cpu_centroid[t]-updatedMean[t]));
 		if(delta > max_delta){
@@ -611,8 +611,8 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 
 	if(norm_sequences) {
 		/* Rescale the average to the centroid's value range. */
-		double medoidAvg = 0.0;
-		double medoidStdDev = 0.0;
+		double medoidAvg = (double) 0.0f;
+		double medoidStdDev = (double) 0.0f;
 		T *medoidSequence = sequences[medoidIndex];
 		for(int i = 0; i < medoidLength; i++){
 			medoidAvg += medoidSequence[i];
