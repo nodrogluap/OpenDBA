@@ -35,6 +35,15 @@ fastcluster.o: fastcluster.cpp
 openDBA.o: openDBA.cu openDBA.cuh segmentation.hpp cpu_utils.hpp gpu_utils.hpp io_utils.hpp exit_codes.hpp dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
 	nvcc -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
 
+plugins: vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so
+
+vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so:
+	git submodule update --init --recursive ;\
+	mkdir -f vendor/plugins/vbz_compression/build ;\
+	cd vendor/plugins/vbz_compression/build ;\
+	cmake -D CMAKE_BUILD_TYPE=Release -D ENABLE_CONAN=OFF -D ENABLE_PERF_TESTING=OFF -D ENABLE_PYTHON=OFF .. ;\
+	make
+
 $(PROGNAME): Makefile openDBA.o multithreading.o fastcluster.o
 	nvcc $(NVCC_FLAGS) --compiler-options -fPIC openDBA.o multithreading.o fastcluster.o -o $(PROGNAME)
 
