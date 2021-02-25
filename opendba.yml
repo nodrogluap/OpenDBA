@@ -1,0 +1,28 @@
+name: opendba
+channels:
+  - r
+  - bioconda
+  - defaults
+  - conda-forge
+dependencies:
+  - _libgcc_mutex=0.1=main
+  - bzip2=1.0.8=h7b6447c_0
+  - ca-certificates=2021.1.19=h06a4308_0
+  - cmake=3.19.4=h973ab73_0
+  - expat=2.2.10=he6710b0_2
+  - hdf5=1.12.0=hc3cf35f_0
+  - krb5=1.18.2=h173b8e3_0
+  - libcurl=7.71.1=h20c2e04_1
+  - libedit=3.1.20191231=h14c3975_1
+  - libgcc-ng=9.1.0=hdf63c60_0
+  - libgfortran-ng=7.3.0=hdf63c60_0
+  - libssh2=1.9.0=h1ba5d50_1
+  - libstdcxx-ng=9.1.0=hdf63c60_0
+  - libuv=1.40.0=h7b6447c_0
+  - lz4-c=1.9.3=h2531618_0
+  - ncurses=6.2=he6710b0_1
+  - openssl=1.1.1j=h27cfd23_0
+  - rhash=1.4.1=h3c74f83_1
+  - xz=5.2.5=h7b6447c_0
+  - zlib=1.2.11=h7b6447c_3
+  - zstd=1.4.5=h9ceee32_0
