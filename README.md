@@ -107,3 +107,12 @@ This is mitigated in the OpenDBA software by reversing the open end step option 
 The consensus for 3 raw sequences starts to smooth out the signal (less vertical "fat"), allowing us to look at fundamental properties of molecules like dwell time bias, irreducible noise, transition effects, etc. without a reference bias or including only signals that were well interpreted by a neural network basecaller.  On an RTX 2080 Ti GPU, consensus was calculated in 1 minute and 34 seconds, whereas the Java DBA implementation took 47 minutes. Due to the inherent parallelism of OpenDBA, consensus of sets of hundreds of sequences take only marginally longer than for 3 sequences.
 
 ![Centroid consensus for the three raw nanopore virus direct RNA sequences used in the previous graphs](docs/rhinoA_3seq_raw_signal_dba.png)
+
+## Common Problems &amp; Solutions
+
+If the code does not compile, you may have encountered a bug in CentOS 7's glibc implementation. The solution can be found [here](https://github.com/nodrogluap/OpenDBA/issues/9).
+
+If you are parsing a FAST5 file and encounter errors like ```could not get ##### Signal from multi FAST5 (HDF5) file```, the file likely contains data using a [vendor-specific compression format called VBZ](https://github.com/nanoporetech/vbz_compression). In this case, you will either need to precompile the dyanmically linked HDF5 plugin for decoding it, or have OpenDBA's Makefile do it for you with ```make plugins```. This plugin is found at run-time by the HDF5 library by using the environment variable ```HDF5_PLUGIN_PATH=/dir/where/you/compiled/libvbz_hdf_plugin.so```, but if you used the OpenDBA make plugins command this will be automatically found by running openDBA through the wrapper script ```openDBA.sh```. 
+
+If running ```make plugins``` causes errors, you may not have all the build environment tools required to build the VBZ plugin (i.e. cmake, libzstd, libhdf5). If you are a conda user, the ```opendba.yml``` file can be used to create the right build environment. 
+
