@@ -112,7 +112,17 @@ The consensus for 3 raw sequences starts to smooth out the signal (less vertical
 
 If the code does not compile, you may have encountered a bug in CentOS 7's glibc implementation. The solution can be found [here](https://github.com/nodrogluap/OpenDBA/issues/9).
 
-If you are parsing a FAST5 file and encounter errors like ```could not get ##### Signal from multi FAST5 (HDF5) file```, the file likely contains data using a [vendor-specific compression format called VBZ](https://github.com/nanoporetech/vbz_compression). In this case, you will either need to precompile the dyanmically linked HDF5 plugin for decoding it, or have OpenDBA's Makefile do it for you with ```make plugins```. This plugin is found at run-time by the HDF5 library by using the environment variable ```HDF5_PLUGIN_PATH=/dir/where/you/compiled/libvbz_hdf_plugin.so```, but if you used the OpenDBA make plugins command this will be automatically found by running openDBA through the wrapper script ```openDBA.sh```. 
+If you are parsing a FAST5 file and encounter errors like `could not get ##### Signal from multi FAST5 (HDF5) file`, the file likely contains data using a [vendor-specific compression format called VBZ](https://github.com/nanoporetech/vbz_compression). In this case, you will either need to precompile the dynamically linked HDF5 plugin for decoding it, or have OpenDBA's Makefile do it for you with `make plugins`. This plugin is found at run-time by the HDF5 library by using the environment variable `HDF5_PLUGIN_PATH=/dir/where/you/compiled/libvbz_hdf_plugin.so`, but if you used the OpenDBA make plugins command this will be automatically found by running openDBA through the wrapper script `openDBA.sh`. 
 
-If running ```make plugins``` causes errors, you may not have all the build environment tools required to build the VBZ plugin (i.e. cmake, libzstd, libhdf5). If you are a conda user, the ```opendba.yml``` file can be used to create the right build environment. 
+If running `make plugins` causes errors, you may not have all the build environment tools required to build the VBZ plugin (i.e. cmake, libzstd, libhdf5). If you are a conda user, the `opendba.yml` file can be used to create the right build environment:
+
+```bash
+conda env create -f opendba.yml
+```
+
+Then any time you want to run the compile or run start with:
+
+```
+conda activate opendba
+```
 
