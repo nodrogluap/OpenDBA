@@ -396,12 +396,14 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
         // Working memory for the segmentation that will happen in the kernel to follow.
 	// It's too big to fit in L1 cache, so use global memory, or host if required via Managed Memory :-P
 	unsigned short *k_seg_path_working_buffer;
-        size_t k_seg_path_size = sizeof(unsigned short)*(all_seqs_downaverage_length/downaverage_width+1)*maximum_k_per_subtask;
+        size_t k_seg_path_size = sizeof(unsigned short)*all_seqs_downaverage_length*maximum_k_per_subtask;
 	cudaMalloc(&k_seg_path_working_buffer, k_seg_path_size);     
 	if(cudaGetLastError() != cudaSuccess) {
+		std::cerr << "Not enough GPU memory to do segmentation completely on device, using CUDA managed memory instead." << std::endl;
 		cudaMallocManaged(&k_seg_path_working_buffer, k_seg_path_size);
 	}
 	CUERR("Allocating GPU memory for segmentation paths");
+	std::cerr << "K seg buffer size is " << k_seg_path_size << " at " << k_seg_path_working_buffer << std::endl;
 
 	// Invoke the segmentation kernel once all the async memory copies are finished.
 	// Not neccesary if streams are working properly: cudaStreamSynchronize(stream);    CUERR("Synchronizing stream after raw query transfer to GPU for segmentation"); 
