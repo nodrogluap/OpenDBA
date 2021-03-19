@@ -258,7 +258,6 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 				noisy = true;
                         }
                 }
-		//if(threadIdx.x == 0)printf("This test_expected_k was %d, noisy status %d", test_expected_k, noisy ? 1 : 0);
 		if(delta == 0 || test_expected_k + delta > max_expected_k){
 			exit = true;
 		}
@@ -286,6 +285,7 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                                 	orig_data_copy[threadIdx.x*downsample_width+i] = series[threadIdx.x*downsample_width+blockIdx.y*raw_samples_per_threadblock+i];
                         	}
 			}
+			__syncthreads(); // so all the data for any given segment is in place before we sort
 
 			if(threadIdx.x > test_expected_k && threadIdx.x <= max_expected_k) {
 				// Sentinel answer for unused result slots (K is smaller than the expect value passed in), since the amount of space for answers was preallocated.
@@ -301,7 +301,6 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                                 	right_boundary = N;
                         	}
 				
-				__syncthreads(); // so all the data for any given segment is in plac/Users/gordonp/Downloads e before we sort
                         	// Bubble sort the L1 cache values for each segment in place so we can run this quickly and easily get the median for each segment.
                         	int left_boundary = (breakpoints[threadIdx.x-1])*downsample_width;
                         	for(int i = left_boundary; i < right_boundary-1; ++i){ // +1 as starting point as left boundary is non-inclusive.
