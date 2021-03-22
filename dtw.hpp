@@ -111,8 +111,14 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 			if(threadIdx.x == 0){
 				dtwCostSoFar[0] = numeric_limits<T>::max();
 			}
+			// As we've made a final determination for the cost, record it to GPU memory
+        		if(dtwPairwiseDistances != 0 && threadIdx.x == 0){
+                        	// 1D index for row into distances upper left pairs triangle is the total size of the triangle, minus all those that haven't been processed yet.
+                        	dtwPairwiseDistances[ARITH_SERIES_SUM(num_sequences-1)-ARITH_SERIES_SUM(num_sequences-first_seq_index-1)+blockIdx.x] = (T) sqrtf(newDtwCostSoFar[first_seq_length-1]);
+        		}
 			return;
 	  	}
+
 	}
 
 	if(threadIdx.x == 0){

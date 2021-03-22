@@ -93,7 +93,7 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 	// To save on space while still calculating all possible DTW paths, we process all DTWs for one sequence at the same time.
         // So allocate space for the dtwCost to get to each point on the border between grid vertical swaths of the total cost matrix.
 	int dotsPrinted = 0;
-	std::cerr << "Step 2 of 3: Finding medoid" << std::endl;
+	std::cerr << "Step 2 of 3: Finding initial medoid amongst the " << num_sequences << " sequences" << std::endl;
 	std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
 	char spinner[4] = { '|', '/', '-', '\\'};
 	for(size_t seq_index = 0; seq_index < num_sequences-1; seq_index++){
@@ -200,9 +200,9 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 			dtwPairwiseDistanceSquared *= dtwPairwiseDistanceSquared;
 			dtwSoS[seq_index] += dtwPairwiseDistanceSquared;
 			dtwSoS[paired_seq_index] += dtwPairwiseDistanceSquared;
-			//std::cerr << "gpu_dtwPairwiseDistances for (" << seq_index << "," << paired_seq_index << ") is " << dtwPairwiseDistanceSquared << std::endl;
+			std::cerr << "gpu_dtwPairwiseDistances for (" << seq_index << "," << paired_seq_index << ") is " << dtwPairwiseDistanceSquared << std::endl;
 		}
-		index_offset += num_sequences-seq_index-1;
+		index_offset += num_sequences - seq_index - 1;
 		mats << std::endl;
 	}
 	// Last line is pro forma as all pair distances have already been printed
@@ -214,9 +214,9 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 
 	int medoidIndex = -1;
 	// Pick the smallest squared distance across all the sequences.
-	if(num_sequences < 2){
+	if(num_sequences > 2){
 		T lowestSoS = std::numeric_limits<T>::max();
-		for(size_t i = 0; i < num_sequences-1; ++i){
+		for(size_t i = 0; i < num_sequences; ++i){
 			if (dtwSoS[i] < lowestSoS) {
 				medoidIndex = i;
 				lowestSoS = dtwSoS[i];
@@ -232,7 +232,7 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 		cudaSetDevice(i);
 		cudaFree(gpu_dtwPairwiseDistances[i]); CUERR("Freeing GPU memory for DTW pairwise distances");
 	}
-	cudaFreeHost(gpu_dtwPairwiseDistances); CUERR("Freeing CPU memory for GPU DTW pairwise distancesa' pointers");
+	cudaFreeHost(gpu_dtwPairwiseDistances); CUERR("Freeing CPU memory for GPU DTW pairwise distances' pointers");
 	mats.close();
 	return medoidIndex;
 }
