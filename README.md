@@ -120,7 +120,7 @@ If running `make plugins` causes errors, you may not have all the build environm
 conda env create -f opendba.yml
 ```
 
-Then any time you want to run the compile or run start with:
+Then any time you want to run the compile or run start OpenDBA with:
 
 ```
 conda activate opendba
