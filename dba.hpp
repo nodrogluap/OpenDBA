@@ -200,7 +200,6 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 			dtwPairwiseDistanceSquared *= dtwPairwiseDistanceSquared;
 			dtwSoS[seq_index] += dtwPairwiseDistanceSquared;
 			dtwSoS[paired_seq_index] += dtwPairwiseDistanceSquared;
-			std::cerr << "gpu_dtwPairwiseDistances for (" << seq_index << "," << paired_seq_index << ") is " << dtwPairwiseDistanceSquared << std::endl;
 		}
 		index_offset += num_sequences - seq_index - 1;
 		mats << std::endl;
