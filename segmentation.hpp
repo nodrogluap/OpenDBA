@@ -398,13 +398,13 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 		for(int currDevice = 0; currDevice < deviceCount; currDevice++){
 			cudaSetDevice(currDevice);
 			T **rawseq_ptr = rawseq_ptrs[currDevice]; // splitting the data up amongst the GPUs available
-			if(i%deviceCount){ // Not for use in this GPU, set the sequence pointer to null so it'll be skipped in the seg kernel
-				rawseq_ptr[i] = (T *) 0;
-			}
-			else{
+			if(i%deviceCount == currDevice){ // Not for use in this GPU, set the sequence pointer to null so it'll be skipped in the seg kernel
     				cudaMalloc(&rawseq_ptr[i], sizeof(T)*seq_lengths[i]);   CUERR("Allocating GPU memory for segmenting raw input sequence");
     				cudaMemcpyAsync(rawseq_ptr[i], sequences[i], sizeof(T)*seq_lengths[i], cudaMemcpyHostToDevice, dev_stream[currDevice]);          CUERR("Launching raw query copy to managed memory for segmentation");
         			all_seqs_downaverage_length[currDevice] += DIV_ROUNDUP(seq_lengths[i], downaverage_width);
+			}
+			else{
+				rawseq_ptr[i] = (T *) 0;
 			}
 		}
 	}
