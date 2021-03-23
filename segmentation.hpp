@@ -14,15 +14,15 @@ using namespace cudahack; // for device side numeric_limits
    The minimized measure is the mean squared error of the segmental regression.
    The segmentation is "adaptive" insofar as a maximum number of expected segments is passed in, but if 
    <min_segment_size data points are creating their own segments we assume that they are noise and we should try 
-   segmentaing again with a smaller number of expected segments. 
+   segmenting again with a smaller number of expected segments. 
 
    Process a bunch of different data series in parallel on the GPU. This is an intense dynamic programming process that has some parallelizable steps. Also,
    segmentation is a semi-local optimization problem in practice, so if you have a really long query, we need to split it up into chunks for segmentation
-   to keep things moving along at a reasonable pace with shared data in each kernel's L1 cache. An 'epsilon' heuristic is used to merge last/first segements of  
+   to keep things moving along at a reasonable pace with shared data in each kernel's L1 cache. An 'epsilon' heuristic is used to merge last/first segments of  
    neighbouring segmentation subtask results.
 
    The distance calculation and usage are in heavily used loops, so to keep it in L1 cache we need to downaverage (take avg value of non-overlapping blocks of signal) 
-   the original data at least a bit to fit.  This also has the effect of minimizing the impact of errant data points in the stream.
+   the original data at least a bit to fit.  This also has the effect of minimizing the impact of errant individual data points in the stream.
 
    We also dynamically set a maximum size for a segment (as a multiple of the average size), in order to reduce the search space and memory requirement.
 */
@@ -50,23 +50,32 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
                                              int min_segment_size, int sharedMemSize, unsigned short *k_seg_path_working_buffer, 
                                              T *output_segmental_medians){
 
+	// To facilitate the segmentation happening over multiple GPUs but writing back to a unified result space, we have put sentinel
+	// values of NULL into the all_series array to indicate that this device should not process this member of the series, 
+	// so we can just return without doing any work.
+	const T *series = all_series[blockIdx.x];
+	if(series == 0){
+		return;
+	}
+
 	// Recomputed rather than passed in to save SM registers, must correspond to same line in the host function further below.
 	short downsample_width = DIV_ROUNDUP(min_segment_size,3);
 	int orig_N = all_series_lengths[blockIdx.x];
 	if(blockIdx.y*raw_samples_per_threadblock >= orig_N){ // no data to process
 		return; // this is safe as all threads in this block will take this short-circuit branch and not cause hangs in the __syncthreads() calls below
 	}
-	const T *series = all_series[blockIdx.x];
 
 	// "*_before_us" vars are used to determine the offset of this threadblock's required global memory intermediate-working and output values.
 	// As the input all_series is a ragged array, we need to figure out where to write the values for this query
 	// by summing up the lengths of the raw and segmented data before this block.
-	size_t datapoints_before_us = 0;
-	size_t segments_before_us = 0;
+	size_t datapoints_before_us = 0; // this is intermediate values, local to the device
+	size_t segments_before_us = 0; // this is output, global across devices
 	for(int query_num = 0; query_num < blockIdx.x; query_num++){
 		// K segments guaranteed per full threadblock. Count all full thread blocks for this query, plus the last partial block.
 		int query_length = all_series_lengths[query_num];
-		datapoints_before_us += DIV_ROUNDUP(query_length,downsample_width);
+		if(all_series[query_num] != 0){ // we're determining a location in a per device buffer here, only count the seqs that were assigned to this GPU
+			datapoints_before_us += DIV_ROUNDUP(query_length,downsample_width);
+		}
 		segments_before_us += DIV_ROUNDUP(query_length,raw_samples_per_threadblock)*max_expected_k;
 	}
 	// Account for offset within this seq
@@ -327,9 +336,7 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
         }
 }
 
-/* The results of the segmentation go into T** segmented_sequences and size_t *segmented_seq_lengths, which are arrays that must must be preallocated. 
-   The individual segmented sequences will be assigned in this method as part of one big memory block allocation, so you can simply 
-   cudaFree(segmented_sequences) in the caller when you're done with them. */
+/* The results of the segmentation go into T** segmented_sequences and size_t *segmented_seq_lengths, which are arrays that get allocated here (you should free them later). */
 template<typename T>
 __host__ void
 adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_segment_length,
@@ -346,21 +353,40 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	int maximum_k_per_subtask = DIV_ROUNDUP(threads_per_block,((float) min_segment_length)/downaverage_width);
 
 	// TODO: maybe do a number of grids and use multiple devices if present rather than doing all the computation in one grid (and the associated memory requirement of that)
+	int deviceCount;
+	cudaGetDeviceCount(&deviceCount); CUERR("Getting GPU device count in segmentation setup method");
 	
 	// Suss out the total queries size so we can allocate the right amount of working buffers and results arrays.
-	long all_seqs_downaverage_length = 0;
+	long *all_seqs_downaverage_length; // breaking it down into what's need per device based on assigned seqs for each device
+	cudaMallocHost(&all_seqs_downaverage_length, sizeof(long)*deviceCount); CUERR("Allocating CPU memory for array of downaveraged seq length totals");
+	for(int currDevice = 0; currDevice < deviceCount; currDevice++){
+		all_seqs_downaverage_length[currDevice] = 0; // poor man's memset()
+	}
 	long total_expected_segments = 0;
 	int longest_query = 0;
-	T **gpu_rawseqs;
-	cudaMalloc(&gpu_rawseqs, sizeof(T *)*num_seqs);   CUERR("Allocating GPU memory for segmenting raw query starts");
-	T **rawseq_ptrs;
+	T ***gpu_rawseqs;
+	cudaMallocHost(&gpu_rawseqs, sizeof(T **)*deviceCount); CUERR("Allocating CPU memory for array of segmenting raw query starts");
+	for(int currDevice = 0; currDevice < deviceCount; currDevice++){
+		cudaSetDevice(currDevice);
+		cudaMalloc(&gpu_rawseqs[currDevice], sizeof(T *)*num_seqs);   CUERR("Allocating GPU memory for segmenting raw query starts");
+	}
+	T ***rawseq_ptrs;
+	cudaMallocHost(&rawseq_ptrs, sizeof(T **)*deviceCount); CUERR("Allocating CPU memory for array of segmenting raw queries");
+	for(int currDevice = 0; currDevice < deviceCount; currDevice++){
+		cudaSetDevice(currDevice);
+		cudaMallocHost(&rawseq_ptrs[currDevice], sizeof(T *)*num_seqs);   CUERR("Allocating CPU memory for segmenting raw queries");
+	}
 	T **padded_segmented_sequences;
-	cudaMallocHost(&rawseq_ptrs, sizeof(T *)*num_seqs);   CUERR("Allocating GPU memory for segmenting raw query starts");
         cudaMallocHost(&padded_segmented_sequences, sizeof(T *)*num_seqs); CUERR("Allocating CPU memory for the padded segmented sequence pointers");
         cudaMallocHost(segmented_sequences, sizeof(T *)*num_seqs); CUERR("Allocating CPU memory for the segmented sequence pointers");
 	cudaMallocHost(segmented_seq_lengths, sizeof(size_t)*num_seqs); CUERR("Allocating CPU memory for the segmented sequence lengths");
+	cudaStream_t *dev_stream;
+        cudaMallocHost(&dev_stream, sizeof(cudaStream_t)*deviceCount); CUERR("Allocating CPU memory for sequence segmentation streams");
+	for(int currDevice = 0; currDevice < deviceCount; currDevice++){
+		cudaSetDevice(currDevice);
+		cudaStreamCreate(&dev_stream[currDevice]); CUERR("Creating device stream for sequence segmentation");
+	}
 	for(int i = 0; i < num_seqs; ++i){
-        	all_seqs_downaverage_length += DIV_ROUNDUP(seq_lengths[i], downaverage_width);
 		if(seq_lengths[i] > longest_query){
 			longest_query = seq_lengths[i];
 		}
@@ -369,10 +395,23 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
         	total_expected_segments += (*segmented_seq_lengths)[i];
 
     		// Asynchronously slurp each query into device memory for maximum PCIe bus transfer rate efficiency from CPU to the GPU via the Copy Engine, or lazy copy in managed memory. 
-    		cudaMallocHost(&rawseq_ptrs[i], sizeof(T)*seq_lengths[i]);   CUERR("Allocating GPU memory for segmenting raw input sequence");
-    		cudaMemcpyAsync(rawseq_ptrs[i], sequences[i], sizeof(T)*seq_lengths[i], cudaMemcpyHostToDevice, stream);          CUERR("Launching raw query copy to managed memory for segmentation");
+		for(int currDevice = 0; currDevice < deviceCount; currDevice++){
+			cudaSetDevice(currDevice);
+			T **rawseq_ptr = rawseq_ptrs[currDevice]; // splitting the data up amongst the GPUs available
+			if(i%deviceCount){ // Not for use in this GPU, set the sequence pointer to null so it'll be skipped in the seg kernel
+				rawseq_ptr[i] = (T *) 0;
+			}
+			else{
+    				cudaMalloc(&rawseq_ptr[i], sizeof(T)*seq_lengths[i]);   CUERR("Allocating GPU memory for segmenting raw input sequence");
+    				cudaMemcpyAsync(rawseq_ptr[i], sequences[i], sizeof(T)*seq_lengths[i], cudaMemcpyHostToDevice, dev_stream[currDevice]);          CUERR("Launching raw query copy to managed memory for segmentation");
+        			all_seqs_downaverage_length[currDevice] += DIV_ROUNDUP(seq_lengths[i], downaverage_width);
+			}
+		}
 	}
-	cudaMemcpyAsync(gpu_rawseqs, rawseq_ptrs, sizeof(T *)*num_seqs, cudaMemcpyHostToDevice, stream); CUERR("Launching raw query pointer array copy from CPU to GPU for segmentation");
+	for(int currDevice = 0; currDevice < deviceCount; currDevice++){
+		cudaSetDevice(currDevice);
+		cudaMemcpyAsync(gpu_rawseqs[currDevice], rawseq_ptrs[currDevice], sizeof(T *)*num_seqs, cudaMemcpyHostToDevice, dev_stream[currDevice]); CUERR("Launching raw query pointer array copy from CPU to GPU for segmentation");
+	}
 
 	// Allocate all of the memory required to store the segmentation results in one go, then do the pointer math so that segmented_sequences
 	// points to the start of the results slice corresponding to each input sequence.
@@ -385,41 +424,62 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 		cursor += maximum_k_per_subtask*DIV_ROUNDUP(seq_lengths[i],samples_per_block);
 	}
 
-	size_t *gpu_rawseq_lengths = 0;
-    	cudaMalloc(&gpu_rawseq_lengths, sizeof(size_t)*num_seqs);   CUERR("Allocating GPU memory for raw input query lengths for segmentation");
-	cudaMemcpyAsync(gpu_rawseq_lengths, seq_lengths, sizeof(size_t)*num_seqs, cudaMemcpyHostToDevice, stream); CUERR("Launching raw query lengths copy from CPU to GPU for segmentation");
+	size_t **gpu_rawseq_lengths = 0;
+	cudaMallocHost(&gpu_rawseq_lengths, sizeof(size_t *)*deviceCount); CUERR("Allocating CPU memory for array of raw input query lengths for segmentation");
+	for(int currDevice = 0; currDevice < deviceCount; currDevice++){
+		cudaSetDevice(currDevice);
+    		cudaMalloc(&gpu_rawseq_lengths[currDevice], sizeof(size_t)*num_seqs);   CUERR("Allocating GPU memory for raw input query lengths for segmentation");
+		cudaMemcpyAsync(gpu_rawseq_lengths[currDevice], seq_lengths, sizeof(size_t)*num_seqs, cudaMemcpyHostToDevice, dev_stream[currDevice]); CUERR("Launching raw query lengths copy from CPU to GPU for segmentation");
+	}
 
 	// Divvy up the work into a kernel grid based on the longest input query.
 	int max_req_block_in_a_query = DIV_ROUNDUP(longest_query,samples_per_block);
 
         // Working memory for the segmentation that will happen in the kernel to follow.
 	// It's too big to fit in L1 cache, so use global memory, or host if required via Managed Memory :-P
-	unsigned short *k_seg_path_working_buffer;
-        size_t k_seg_path_size = sizeof(unsigned short)*all_seqs_downaverage_length*maximum_k_per_subtask;
-	cudaMalloc(&k_seg_path_working_buffer, k_seg_path_size);     
-	if(cudaGetLastError() != cudaSuccess) {
-		std::cerr << "Not enough GPU memory to do segmentation completely on device, using CUDA managed memory instead." << std::endl;
-		cudaMallocManaged(&k_seg_path_working_buffer, k_seg_path_size);
-	}
-	CUERR("Allocating GPU memory for segmentation paths");
-	std::cerr << "K seg buffer size is " << k_seg_path_size << " at " << k_seg_path_working_buffer << std::endl;
-
+	unsigned short **k_seg_path_working_buffer;
+	cudaMallocHost(&k_seg_path_working_buffer, sizeof(unsigned short *)*deviceCount); CUERR("Allocating CPU memory for array of GPU segmentation buffer pointers");
 	// Invoke the segmentation kernel once all the async memory copies are finished.
-	// Not neccesary if streams are working properly: cudaStreamSynchronize(stream);    CUERR("Synchronizing stream after raw query transfer to GPU for segmentation"); 
-	dim3 raw_grid(num_seqs, max_req_block_in_a_query, 1);
-	std::cerr << "Processing " << samples_per_block << " samples per threadblock with " << threads_per_block << " threads, max " << 
-                     maximum_k_per_subtask << " segments, grid (" << num_seqs << ", " << max_req_block_in_a_query << ",1)" << std::endl;
-	int maxSharedMemoryPerBlockOptin = 48*1024; // default is 48K for device backward compatibility
-	int deviceNum = 0;
-	cudaDeviceGetAttribute(&maxSharedMemoryPerBlockOptin, cudaDevAttrMaxSharedMemoryPerBlockOptin, deviceNum);
-	cudaFuncSetAttribute(reinterpret_cast<void*>(adaptive_device_segmentation<T>), cudaFuncAttributeMaxDynamicSharedMemorySize, maxSharedMemoryPerBlockOptin); // Maximize explicit use of L1 cache
-        adaptive_device_segmentation<T><<<raw_grid,threads_per_block,maxSharedMemoryPerBlockOptin,stream>>>(gpu_rawseqs,
-                               gpu_rawseq_lengths, samples_per_block, maximum_k_per_subtask, min_segment_length, maxSharedMemoryPerBlockOptin, k_seg_path_working_buffer, 
+	cudaStreamSynchronize(stream);    CUERR("Synchronizing stream after raw query transfer to GPU for segmentation"); 
+	for(int currDevice = 0; currDevice < deviceCount; currDevice++){
+		cudaSetDevice(currDevice);
+        	size_t k_seg_path_size = sizeof(unsigned short)*all_seqs_downaverage_length[currDevice]*maximum_k_per_subtask;
+       		cudaMalloc(&k_seg_path_working_buffer[currDevice], k_seg_path_size);
+        	if(cudaGetLastError() != cudaSuccess) {
+                	std::cerr << "Not enough GPU memory to do segmentation completely on device, using CUDA managed memory instead." << std::endl;
+                	cudaMallocManaged(&k_seg_path_working_buffer, k_seg_path_size);
+	        	std::cerr << "K seg buffer size is " << k_seg_path_size << " at " << k_seg_path_working_buffer << std::endl;
+        	}
+        	CUERR("Allocating GPU memory for segmentation paths");
+
+		dim3 raw_grid(num_seqs, max_req_block_in_a_query, 1);
+		//std::cerr << "Processing " << samples_per_block << " samples per threadblock with " << threads_per_block << " threads, max " << 
+                //     maximum_k_per_subtask << " segments, grid (" << num_seqs << ", " << max_req_block_in_a_query << ",1)" << std::endl;
+		int maxSharedMemoryPerBlockOptin = 48*1024; // default is 48K for device backward compatibility
+		cudaDeviceGetAttribute(&maxSharedMemoryPerBlockOptin, cudaDevAttrMaxSharedMemoryPerBlockOptin, currDevice);
+		cudaFuncSetAttribute(reinterpret_cast<void*>(adaptive_device_segmentation<T>), cudaFuncAttributeMaxDynamicSharedMemorySize, maxSharedMemoryPerBlockOptin); // Maximize explicit use of L1 cache
+        	adaptive_device_segmentation<T><<<raw_grid,threads_per_block,maxSharedMemoryPerBlockOptin,dev_stream[currDevice]>>>(gpu_rawseqs[currDevice],
+                               gpu_rawseq_lengths[currDevice], samples_per_block, maximum_k_per_subtask, min_segment_length, maxSharedMemoryPerBlockOptin, k_seg_path_working_buffer[currDevice], 
                                all_segmentation_results);  CUERR("Launching sequence segmentation");
+	}
+	for(int currDevice = 0; currDevice < deviceCount; currDevice++){
+		cudaStreamSynchronize(dev_stream[currDevice]); CUERR("Synchronizing CUDA device after sequence segmentation");
+		cudaStreamDestroy(dev_stream[currDevice]); CUERR("Destroying now-redundant CUDA device stream that was used for sequence segmentation");
+		for(int i = 0; i < num_seqs; i++){
+			if(rawseq_ptrs[currDevice][i] != 0){
+				cudaFree(rawseq_ptrs[currDevice][i]); CUERR("Freeing GPU memory for a raw query");
+			}
+		}
+		cudaFreeHost(rawseq_ptrs[currDevice]);			    CUERR("Freeing CPU memory for raw query pointers");
+		cudaFree(gpu_rawseqs[currDevice]);                          CUERR("Freeing GPU memory for raw queries");
+		cudaFree(gpu_rawseq_lengths[currDevice]);                   CUERR("Freeing GPU memory for raw query lengths");
+        	cudaFree(k_seg_path_working_buffer[currDevice]);            CUERR("Freeing GPU memory for segmentation paths");
+	}
 	cudaStreamSynchronize(stream);                  CUERR("Synchronizing stream after sequence segmentation");
-        cudaFree(k_seg_path_working_buffer);            CUERR("Freeing GPU memory for segmentation paths");
-	cudaFree(gpu_rawseqs);                          CUERR("Freeing GPU memory for raw queries");
-	cudaFree(gpu_rawseq_lengths);                   CUERR("Freeing GPU memory for raw query lengths");
+	cudaFreeHost(rawseq_ptrs);                          CUERR("Freeing CPU memory for array of device raw query pointers");
+	cudaFreeHost(gpu_rawseqs);                          CUERR("Freeing CPU memory for array of device raw queries");
+        cudaFreeHost(k_seg_path_working_buffer);            CUERR("Freeing GPU memory for segmentation paths");
+
 
 	// See if the segments at the edge of each segmentation block need to be merged (i.e. a segment was artificially split across two CUDA kernel grid tasks).
 	// The criterion is that the segments' medians differ by less than the proportion 'epsilon', which is automaticaly determined as the minimum difference between 
@@ -427,8 +487,6 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	// At the same time, we allocated enough memory for segmentation results where the actual K in each subtask (kernel call grid element) was the expected K.
 	// If the adaptive segmentation actually found that there was less than K segments in the subtask, the remaining unused results slots will have a sentinel
 	// value, numeric_limits::max(T), that we must eliminate before passing the answer back to the caller.
-	//cudaMemcpyAsync(cpu_all_segmentation_results, all_segmentation_results, sizeof(T)*total_expected_segments, cudaMemcpyDeviceToHost, stream);  CUERR("Copying sequence segmentation results to host");
-	//cudaStreamSynchronize(stream);                  CUERR("Synchronizing stream after sequence segmentation results copy to host");
 	for(int i = 0; i < num_seqs; ++i){
 		double epsilon = std::numeric_limits<double>::max();
 		T *segmented_sequence = padded_segmented_sequences[i];
