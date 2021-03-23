@@ -74,7 +74,7 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 		cudaGetDeviceProperties(&deviceProp, i); CUERR("Getting GPU device properties");
 		maxThreads[i] = deviceProp.maxThreadsPerBlock;
 	}
-	std::cerr << "Maximum of " << maxThreads[0] << " threads per block on device 0" << std::endl;
+	//std::cerr << "Maximum of " << maxThreads[0] << " threads per block on device 0" << std::endl;
 
 	T **gpu_dtwPairwiseDistances = 0;
 	cudaMallocHost(&gpu_dtwPairwiseDistances,sizeof(T *)*deviceCount);  CUERR("Allocating CPU memory for GPU DTW pairwise distances' pointers");
@@ -706,7 +706,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
                 maxThreads[i] = deviceProp.maxThreadsPerBlock;
 #endif
         }
-        std::cerr << "Maximum of " << maxThreads[0] << " threads per block on device 0" << std::endl;
+        //std::cerr << "Maximum of " << maxThreads[0] << " threads per block on device 0" << std::endl;
 
         // Declared sentinels to add semantics to DTWDistance call params.
         // A lot of DTW kernel parameters are ignored because we are launching without a real grid, so vars to infer 
