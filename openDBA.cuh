@@ -39,9 +39,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 #if HDF5_SUPPORTED == 1
 	else if(read_mode == FAST5_READ_MODE){ 
 		actual_num_series = readSequenceFAST5Files<T>(series_file_names, num_series, &sequences, &series_file_names, &sequence_lengths); 
-#if DEBUG == 1
 		writeSequences(sequences, sequence_lengths, series_file_names, actual_num_series, CONCAT2(output_prefix, ".seqs.txt").c_str());
-#endif
 	}
 #endif
 	else{ actual_num_series = readSequenceTextFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
@@ -79,9 +77,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	if(min_segment_length > 0){
 		std::cout << "Segmenting with minimum acceptable segment size of " << min_segment_length << std::endl;
 		adaptive_segmentation<T>(sequences, sequence_lengths, actual_num_series, min_segment_length, &segmented_sequences, &segmented_seq_lengths);
-#if DEBUG == 1
 		writeSequences(segmented_sequences, segmented_seq_lengths, series_file_names, actual_num_series, CONCAT2(output_prefix, ".segmented_seqs.txt").c_str());
-#endif
 		for (int i = 0; i < actual_num_series; i++){ cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a presegmentation sequence");}
 		cudaFreeHost(sequences); CUERR("Freeing CPU memory for the presegmentation sequence pointers");
 		cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the presegmentation sequence lengths");
@@ -102,9 +98,9 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	avg_file.close();
 
 	// Cleanup
-	for (int i = 0; i < actual_num_series; i++){ 
-		cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a sequence");
-	}
+	//for (int i = 0; i < actual_num_series; i++){ 
+//		cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a sequence");
+//	}
 	cudaFreeHost(sequences); CUERR("Freeing CPU memory for the segmented sequence pointers");
 	cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the segmented sequence lengths");
 	cudaFreeHost(averageSequence); CUERR("Freeing CPU memory for the DBA result");
