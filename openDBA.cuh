@@ -98,9 +98,13 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	avg_file.close();
 
 	// Cleanup
-	//for (int i = 0; i < actual_num_series; i++){ 
-//		cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a sequence");
-//	}
+	for (int i = 0; i < actual_num_series; i++){ 
+		cudaFreeHost(series_file_names[i]); CUERR("Freeing CPU memory for a sequence name");
+		if(min_segment_length == 0){ // i.e. we still have the original seqs
+			cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for an original sequence");
+		}
+	}
+	cudaFreeHost(series_file_names); CUERR("Freeing CPU memory for the sequence names array");
 	cudaFreeHost(sequences); CUERR("Freeing CPU memory for the segmented sequence pointers");
 	cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the segmented sequence lengths");
 	cudaFreeHost(averageSequence); CUERR("Freeing CPU memory for the DBA result");
