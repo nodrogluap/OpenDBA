@@ -30,6 +30,7 @@ using namespace cudahack;
 
 struct heterogeneous_workload {
     void *dtwCostSoFar_memptr; // we only free it, so datatype templating is not neccesary
+    void *newDtwCostSoFar_memptr; // we only free it, so datatype templating is not neccesary
     unsigned char *pathMatrix_memptr;
     cudaStream_t stream;
 };
@@ -43,6 +44,9 @@ CUT_THREADPROC dtwStreamCleanup(void *void_arg){
 	//std::cerr << "Freeing memory" << std::endl;
 	if(workload->dtwCostSoFar_memptr != 0){
 		cudaFree(workload->dtwCostSoFar_memptr); CUERR("Freeing DTW intermediate cost values");
+	}
+	if(workload->newDtwCostSoFar_memptr != 0){
+		cudaFree(workload->newDtwCostSoFar_memptr); CUERR("Freeing new DTW intermediate cost values");
 	}
 	if(workload->pathMatrix_memptr != 0){
 		cudaFree(workload->pathMatrix_memptr); CUERR("Freeing DTW path matrix");
@@ -135,10 +139,8 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 		}
 		T *dtwCostSoFar = 0;
 		T *newDtwCostSoFar = 0;
-		T *cpu_dtwCostSoFar = 0;
 		cudaMallocManaged(&dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values");
 		cudaMallocManaged(&newDtwCostSoFar, dtwCostSoFarSize); CUERR("Allocating GPU memory for new DTW pairwise distance intermediate values");
-		cudaMallocHost(&cpu_dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating CPU memory for DTW pairwise distance intermediate values");
 
 		// Make calls to DTWDistance serial within each seq, but allow multiple seqs on the GPU at once.
 		cudaStream_t seq_stream; 
@@ -160,6 +162,7 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 		heterogeneous_workload *cleanup_workload = 0;
 		cudaMallocHost(&cleanup_workload, sizeof(heterogeneous_workload)); CUERR("Allocating page locked CPU memory for DTW stream callback data");
 		cleanup_workload->dtwCostSoFar_memptr = dtwCostSoFar;
+		cleanup_workload->newDtwCostSoFar_memptr = newDtwCostSoFar;
 		cleanup_workload->pathMatrix_memptr = 0;
 		cleanup_workload->stream = seq_stream;
 		cudaStreamAddCallback(seq_stream, dtwStreamCleanupLaunch, cleanup_workload, 0);
@@ -360,7 +363,6 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 		T *newDtwCostSoFar = 0;
                 cudaMallocManaged(&dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values");
                 cudaMallocManaged(&newDtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for new DTW pairwise distance intermediate values");
-				// cudaMemset(dtwCostSoFar, 42, centerLength); CUERR("Setting all values in dtwCostSoFar to 42");
 
 		// Under the assumption that long sequences have the same or more information than the centroid, flip the DTW comparison so the centroid has an open end.
 		// Otherwise you're cramming extra sequence data into the wrong spot and the DTW will give up and choose an all-up then all-open right path instead of a diagonal,
@@ -430,32 +432,6 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 		
 		writeDTWPathMatrix<T>(&cpu_stepMatrix, pathMatrix, step_filename.c_str(), columnLimit, rowLimit, pathPitch);
 		
-		/*
-		// Cut this out and move new file write to writeDTWPathMatrix in io_utils.hpp
-		unsigned char *cpu_stepMatrix = 0;
-		T *cpu_costMatrix = 0;
-		std::ofstream step((std::string("stepmatrix")+std::to_string(seq_index)).c_str());
-		std::ofstream cost((std::string("costmatrix")+std::to_string(seq_index)).c_str());
-		
-		cudaMallocHost(&cpu_stepMatrix, sizeof(unsigned char)*pathPitch*(rowLimit+1));
-		cudaMemcpy(cpu_stepMatrix, pathMatrix, sizeof(unsigned char)*pathPitch*(rowLimit+1), cudaMemcpyDeviceToHost);
-		
-		cudaMallocHost(&cpu_costMatrix, sizeof(T)*pathPitch*(rowLimit+1));
-		cudaMemcpy(cpu_costMatrix, dtwCostSoFar, sizeof(T)*pathPitch*(rowLimit+1), cudaMemcpyDeviceToHost);
-		for(int i = 0; i <= rowLimit; i++){
-			for(int j = 0; j <= columnLimit; j++){
-				char move = cpu_stepMatrix[pitchedCoord(j,i,pathPitch)];
-				T cost_val = cpu_costMatrix[pitchedCoord(j,i,pathPitch)];
-				step << (move == DIAGONAL ? "D" : (move == RIGHT ? "R" : (move == UP ? "U" : (move==OPEN_RIGHT ?  "O" : (move ==NIL ? "N" : "?")))));
-				cost << cost_val << " ";
-			}
-			step << std::endl;
-			cost << std::endl;
-		}
-		step.close();
-		cost.close();
-		*/
-		
 		std::ofstream path((std::string("path")+std::to_string(seq_index)).c_str());
 		if(!path.is_open()){
 			std::cerr << "Cannot write to path" << seq_index << std::endl;
@@ -489,6 +465,7 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
                 heterogeneous_workload *cleanup_workload = 0;
                 cudaMallocHost(&cleanup_workload, sizeof(heterogeneous_workload)); CUERR("Allocating page locked CPU memory for DTW stream callback data");
                 cleanup_workload->dtwCostSoFar_memptr = dtwCostSoFar;
+                cleanup_workload->newDtwCostSoFar_memptr = newDtwCostSoFar;
                 cleanup_workload->pathMatrix_memptr = pathMatrix;
                 cleanup_workload->stream = seq_stream;
                 cudaStreamAddCallback(seq_stream, dtwStreamCleanupLaunch, cleanup_workload, 0);
