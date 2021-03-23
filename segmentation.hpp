@@ -475,29 +475,29 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 		cudaFree(gpu_rawseq_lengths[currDevice]);                   CUERR("Freeing GPU memory for raw query lengths");
         	cudaFree(k_seg_path_working_buffer[currDevice]);            CUERR("Freeing GPU memory for segmentation paths");
 	}
-	cudaStreamSynchronize(stream);                  CUERR("Synchronizing stream after sequence segmentation");
 	cudaFreeHost(rawseq_ptrs);                          CUERR("Freeing CPU memory for array of device raw query pointers");
 	cudaFreeHost(gpu_rawseqs);                          CUERR("Freeing CPU memory for array of device raw queries");
         cudaFreeHost(k_seg_path_working_buffer);            CUERR("Freeing GPU memory for segmentation paths");
-
+	cudaStreamSynchronize(stream);                  CUERR("Synchronizing stream after sequence segmentation");
 
 	// See if the segments at the edge of each segmentation block need to be merged (i.e. a segment was artificially split across two CUDA kernel grid tasks).
 	// The criterion is that the segments' medians differ by less than the proportion 'epsilon', which is automaticaly determined as the minimum difference between 
 	// neighbouring elements *within* the segmentation blocks for a given segmented sequence.  *NOTA BENE: This assumes no change in the dynamic range of the signal over time.*
 	// At the same time, we allocated enough memory for segmentation results where the actual K in each subtask (kernel call grid element) was the expected K.
 	// If the adaptive segmentation actually found that there was less than K segments in the subtask, the remaining unused results slots will have a sentinel
-	// value, numeric_limits::max(T), that we must eliminate before passing the answer back to the caller.
+	// value, numeric_limits<T>::max(), that we must eliminate before passing the answer back to the caller.
 	for(int i = 0; i < num_seqs; ++i){
-		double epsilon = std::numeric_limits<double>::max();
+		T epsilon = std::numeric_limits<T>::max(); // N.B.: it's crirical to use the std:: qualifier otherwise you're accessing device side limits from the imported cudahack
 		T *segmented_sequence = padded_segmented_sequences[i];
 		T previous_value = segmented_sequence[0];
-		size_t segmented_seq_length = (*segmented_seq_lengths)[i];
+		size_t segmented_seq_length = (*segmented_seq_lengths)[i]; // this is the preallocated max possible length of results, in reality it has a lot of undefined values probably
 		// Find the minimum signal value change between segments that were generate together (i.e. no intervening sentinel (max) values).
 		for(int j = 1; j < segmented_seq_length; ++j){
 			T current_value = segmented_sequence[j];
-			if(current_value != std::numeric_limits<double>::max() &&
-                           previous_value != std::numeric_limits<double>::max() && 
-                           std::abs((double) (current_value - previous_value)) < epsilon){ // unused slots in the segmentation answer are max valued, so will not beat epsilon 
+			if(current_value != std::numeric_limits<T>::max() &&
+                           previous_value != std::numeric_limits<T>::max() && 
+                           (current_value <= previous_value && previous_value - current_value < epsilon || 
+			    current_value > previous_value && current_value - previous_value < epsilon)){ // unused slots in the segmentation answer are max valued, so will not beat epsilon 
 				// Take into account the fact that we could have neighbouring two segments with the same value 
 				// because the segmentation algorithm uses a byte (0-255) scaled averaging of input sequence bins (as opposed to a sliding window) 
 				// to calculate the residual sums of squares, but then the median value from adjacent segment member bins is returned, which could be the same.
@@ -507,45 +507,49 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 						// Shift down the values as part of the segment value deduplication
 						segmented_sequence[k-1] = segmented_sequence[k];
 						// Shortcircuit: end of the contiguous non-sentinel values
-						if(segmented_sequence[k] == std::numeric_limits<double>::max()){
+						if(segmented_sequence[k] == std::numeric_limits<T>::max()){
 							break;
 						}
 
 					}
 				}
 				else{
-					epsilon = std::abs((double) (current_value-previous_value));
+					// Not using abs function because needs supported type hack (cast and recast) for short, etc.
+					epsilon = current_value < previous_value ? (previous_value-current_value) : (current_value-previous_value);
 				}
 			}
 			previous_value = current_value; 
+
 		}
-		// Merge segmentation subtask result boundary (left and right edge) segments that differ by less than that minimum.
 		bool prev_seg_val_undefined = false;
 		int cursor = 0;
-		//std::cerr << "Seq " << i;
 		for(int j = 0; j < segmented_seq_length; ++j){
-			// Candidate for edge merge
-			if(prev_seg_val_undefined && // i.e. at the start of a new subtask range
-			   segmented_sequence[j] != std::numeric_limits<T>::max() &&
-                           segmented_sequence[cursor-1] < segmented_sequence[j]+epsilon && // i.e. very similar
-			   segmented_sequence[cursor-1] > segmented_sequence[j]-epsilon){	
-				segmented_sequence[cursor-1] = (segmented_sequence[cursor-1]+segmented_sequence[j])/2; // i.e. take the avg
-				prev_seg_val_undefined = false;
-			}
-			else if(segmented_sequence[j] == std::numeric_limits<T>::max()){
-				prev_seg_val_undefined = true;
+			if(segmented_sequence[j] == std::numeric_limits<T>::max()){
+				if(!prev_seg_val_undefined){
+					prev_seg_val_undefined = true;
+				}
+				continue;
 			}
 			else{
-				if(cursor != j){ // We've skipped something already, so all subsequent segment values need to shift left
-		                                 // Copy to results as-is.
-					segmented_sequence[cursor] = segmented_sequence[j];
+                       		// Candidate for edge merge
+                       		// i.e. at the start of a new subtask range
+				if(prev_seg_val_undefined){
+					prev_seg_val_undefined = false;
+                           		if(segmented_sequence[cursor-1] < segmented_sequence[j]+epsilon && // i.e. very similar
+                                   	   segmented_sequence[cursor-1] > segmented_sequence[j]-epsilon){
+                               			segmented_sequence[cursor-1] = (segmented_sequence[cursor-1]+segmented_sequence[j])/2; // i.e. take the avg
+					}
+					else{ // No merge
+					}
 				}
-				prev_seg_val_undefined = false;
-				cursor++;
-			}
-		}
-		//std::cerr << std::endl;
+                                if(cursor != j){ // We've skipped something already, so all subsequent segment values need to shift left
+                                                 // Copy to results as-is.
+                                       segmented_sequence[cursor] = segmented_sequence[j];
+                                }
+                               	cursor++;
+                       }
 
+		}
 		// Set the reported segments total for the seq to reflect the adaptive segmentation results.
 		(*segmented_seq_lengths)[i] = cursor;
 
@@ -555,7 +559,7 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	}
 	cudaStreamSynchronize(stream); CUERR("Synchronizing stream after segemented sequence copy to managed memory");// ensure all the copying had finished before freeing the original results
 	cudaFreeHost(padded_segmented_sequences); CUERR("Freeing managed memory for segmented sequence pointers");
-	// No need to free this as the foirst pointer in padded_segmented_sequences is the same address.
+	// No need to free this as the first pointer in padded_segmented_sequences is the same address.
 	//cudaFreeHost(all_segmentation_results);  CUERR("Freeing managed memory for segmented sequences buffer");
 }
 
