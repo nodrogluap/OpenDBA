@@ -385,12 +385,14 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
                 }
 
 		int dtw_limit = flip_seq_order ? current_seq_length : centerLength;
+#if DEBUG == 1
 		std::string cost_filename = std::string("costmatrix")+std::to_string(seq_index);
 		std::ofstream cost(cost_filename);
 		if(!cost.is_open()){
 			std::cerr << "Cannot write to " << cost_filename << std::endl;
 			return CANNOT_WRITE_DTW_PATH_MATRIX;
 		}	
+#endif
 		//std::cerr << "length of dtw limit is " << dtw_limit << std::endl;
                 for(size_t offset_within_seq = 0; offset_within_seq < dtw_limit; offset_within_seq += threadblockDim.x){
                         // We have a circular buffer in shared memory of three diagonals for minimal proper DTW calculation.
@@ -409,14 +411,16 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 				cudaMemcpyAsync(dtwCostSoFar, newDtwCostSoFar, dtwCostSoFarSize, cudaMemcpyDeviceToDevice, seq_stream); CUERR("Copying DTW pairwise distance intermediate values without flipped sequence order");
 			}
 			cudaStreamSynchronize(seq_stream);
+#if DEBUG == 1
 			for(int i = 0; i < dtw_limit; i++){
 				cost << dtwCostSoFar[i] << ", ";
 			}
 			cost << std::endl;
+#endif
                 }
+#if DEBUG == 1
 		cost.close();
 		/* Start of debugging code, which saves the DTW path for each sequence vs. consensus. Requires C++11 compatibility. */
-#if DEBUG == 1
 		cudaStreamSynchronize(seq_stream);
 		T *cpu_seq;
 		cudaMallocHost(&cpu_seq, sizeof(T)*current_seq_length); CUERR("Allocating CPU memory for query seq");
@@ -661,7 +665,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
         cudaMallocHost(&gpu_sequence_prefixs, sizeof(T*)*deviceCount); CUERR("Allocating CPU memory for array of device-side sequence prefix pointers");
         for(int currDevice = 0; currDevice < deviceCount; currDevice++){
                 cudaSetDevice(currDevice);
-                cudaMallocManaged(&gpu_sequence_prefixs[currDevice], sizeof(T)*sequence_prefix_length); CUERR("Allocating GPU memory for array of sequence prefixes");
+                cudaMalloc(&gpu_sequence_prefixs[currDevice], sizeof(T)*sequence_prefix_length); CUERR("Allocating GPU memory for array of sequence prefixes");
                 cudaMemcpyAsync(gpu_sequence_prefixs[currDevice], sequence_prefix, sizeof(T)*sequence_prefix_length, cudaMemcpyHostToDevice, stream); CUERR("Copying sequence prefix to GPU memory for prefix chopping");
 	}
 	for(int i = 0; i < deviceCount; i++){
@@ -726,8 +730,8 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
 
                 	size_t dtwCostSoFarSize = sizeof(T)*sequence_prefix_length;
                 	// This is small potatoes, we're in real trouble if we can't allocate this.
-                	cudaMallocManaged(&dtwCostSoFars[currDevice], dtwCostSoFarSize);  CUERR("Allocating GPU memory for prefix chopping DTW pairwise distance intermediate values");
-                	cudaMallocManaged(&newDtwCostSoFars[currDevice], dtwCostSoFarSize);  CUERR("Allocating GPU memory for prefix chopping new DTW pairwise distance intermediate values");
+                	cudaMalloc(&dtwCostSoFars[currDevice], dtwCostSoFarSize);  CUERR("Allocating GPU memory for prefix chopping DTW pairwise distance intermediate values");
+                	cudaMalloc(&newDtwCostSoFars[currDevice], dtwCostSoFarSize);  CUERR("Allocating GPU memory for prefix chopping new DTW pairwise distance intermediate values");
                 
                         cudaStreamCreate(&seq_streams[currDevice]);
                 
@@ -759,6 +763,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
                 	cudaStreamSynchronize(seq_streams[currDevice]); CUERR("Synchronizing CUDA device after sequence prefix swath calculation");
 			cudaStreamDestroy(seq_streams[currDevice]); CUERR("Destroying now-redundant CUDA device stream");
 			cudaFree(dtwCostSoFars[currDevice]);
+			cudaFree(newDtwCostSoFars[currDevice]);
 
        			// Need to run an open end DTW to find where the end of the prefix is in the input sequence based on the path
 			// TODO: parallelize within each GPU (see memory alloc note below).
@@ -808,6 +813,11 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
 	}
 	cudaFreeHost(gpu_sequences); CUERR("Freeing CPU memory for chopping sequence array pointers");
 	cudaFreeHost(gpu_sequence_prefixs); CUERR("Freeing CPU memory for chopping sequence prefix pointers");
+        for(int i = 0; i < deviceCount; i++){
+                cudaFree(gpu_sequence_lengths[i]); CUERR("Freeing GPU memory for sequence lengths in prefix search");
+        }
+        cudaFreeHost(gpu_sequence_lengths); CUERR("Freeing GPU memory for the sequence lengths pointer array in prefix search");
+
 
 	// We're going to have to free the incoming sequences once we've chopped them down and made a new more compact copy.
 	std::ofstream chop((std::string(output_prefix)+std::string(".prefix_chop.txt")).c_str());
