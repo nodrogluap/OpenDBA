@@ -477,7 +477,8 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	}
 	cudaFreeHost(rawseq_ptrs);                          CUERR("Freeing CPU memory for array of device raw query pointers");
 	cudaFreeHost(gpu_rawseqs);                          CUERR("Freeing CPU memory for array of device raw queries");
-        cudaFreeHost(k_seg_path_working_buffer);            CUERR("Freeing GPU memory for segmentation paths");
+        cudaFreeHost(k_seg_path_working_buffer);            CUERR("Freeing CPU memory for array of device segmentation path buffers");
+	cudaFreeHost(all_seqs_downaverage_length);	    CUERR("Freeing CPU memory for array of downaverage lengths");
 	cudaStreamSynchronize(stream);                  CUERR("Synchronizing stream after sequence segmentation");
 
 	// See if the segments at the edge of each segmentation block need to be merged (i.e. a segment was artificially split across two CUDA kernel grid tasks).
