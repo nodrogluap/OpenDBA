@@ -526,6 +526,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	}
 	thrust::sort_by_key(sequence_lengths_copy, sequence_lengths_copy + num_sequences, sequences); CUERR("Sorting sequences by length");
 	thrust::sort_by_key(sequence_lengths, sequence_lengths + num_sequences, sequence_names); CUERR("Sorting sequence names by length");
+	cudaFreeHost(sequence_lengths_copy); CUERR("Freeing CPU memory for sortable copy of sequence lengths");
 	size_t maxLength = sequence_lengths[num_sequences-1];
 
 	// Send the sequence metadata and data out to all the devices being used.
