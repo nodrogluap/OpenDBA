@@ -90,8 +90,6 @@ read_text_data(const char *text_file_name, T **output_vals, size_t *num_output_v
 		return 1;
 	}
 
-	// T *out = 0;
-	// cudaMallocHost(&out, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from text file");
 	cudaMallocHost(output_vals, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from text file");
   
 	// Read the actual values
