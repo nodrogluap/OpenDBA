@@ -65,18 +65,21 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 		}
 		if(*seqprefix_length == 0){
 			std::cerr << "Cannot read prefix " << (read_mode == BINARY_READ_MODE ? "binary" : "text") << 
-						" data from " << seqprefix_file_name << ", aborting" << std::endl;
+				" data from " << seqprefix_file_name << ", aborting" << std::endl;
 			exit(CANNOT_READ_SEQUENCE_PREFIX_FILE);
 		}
+		setupPercentageDisplay("Opt-in Step: Chopping sequence prefixes");
 		chopPrefixFromSequences<T>(*seqprefix, *seqprefix_length, &sequences, &actual_num_series, sequence_lengths, series_file_names, output_prefix, norm_sequences);
+		teardownPercentageDisplay();
 		cudaFreeHost(*seqprefix); CUERR("Freeing CPU memory for the prefix sequence");
 		cudaFreeHost(seqprefix); CUERR("Freeing CPU memory for the prefix sequencers pointer");
 		cudaFreeHost(seqprefix_length); CUERR("Freeing CPU memory for the prefix sequence length");
 	}
 	// Step 2. If a minimum segment length was provided, segment the input sequences into unimodal pieces. 
 	if(min_segment_length > 0){
-		std::cout << "Segmenting with minimum acceptable segment size of " << min_segment_length << std::endl;
+		setupPercentageDisplay("Opt-in Step: Segmenting with minimum acceptable segment size of " + std::to_string(min_segment_length));
 		adaptive_segmentation<T>(sequences, sequence_lengths, actual_num_series, min_segment_length, &segmented_sequences, &segmented_seq_lengths);
+		teardownPercentageDisplay();
 		writeSequences(segmented_sequences, segmented_seq_lengths, series_file_names, actual_num_series, CONCAT2(output_prefix, ".segmented_seqs.txt").c_str());
 		for (int i = 0; i < actual_num_series; i++){ cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a presegmentation sequence");}
 		cudaFreeHost(sequences); CUERR("Freeing CPU memory for the presegmentation sequence pointers");

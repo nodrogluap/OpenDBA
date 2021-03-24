@@ -429,7 +429,9 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	// Send the sequence metadata and data out to all the devices being used.
         int deviceCount;
         cudaGetDeviceCount(&deviceCount); CUERR("Getting GPU device count in DBA setup method");
+#if DEBUG == 1
         std::cerr << "Devices found: " << deviceCount << std::endl;
+#endif
 
 	size_t **gpu_sequence_lengths = 0;
 	cudaMallocHost(&gpu_sequence_lengths, sizeof(size_t **)*deviceCount); CUERR("Allocating GPU memory for array of sequence lengths");
@@ -473,7 +475,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 #if DEBUG == 1
 	int maxRounds = 1;
 #else
-	int maxRounds = 1000;
+	int maxRounds = 1; // PG: tmp
 #endif
 	cudaSetDevice(0);
 	for (int i = 0; i < maxRounds; i++) {
@@ -530,7 +532,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
         // Send the sequence metadata and data out to all the devices being used.
         int deviceCount;
         cudaGetDeviceCount(&deviceCount); CUERR("Getting GPU device count in prefix chop method");
-        std::cerr << "Chopping sequence prefixes" << std::endl;
+	int dotsPrinted = 0;
 
         size_t **gpu_sequence_lengths = 0;
         cudaMallocHost(&gpu_sequence_lengths, sizeof(size_t **)*deviceCount); CUERR("Allocating GPU memory for array of sequence lengths for chopping");
@@ -641,6 +643,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
 				CUERR("Launching DTW match of sequences to the sequence prefix");
 				cudaMemcpyAsync(dtwCostSoFars[currDevice], newDtwCostSoFars[currDevice], dtwCostSoFarSize, cudaMemcpyDeviceToDevice, seq_streams[currDevice]); CUERR("Copying DTW sequence prefix costs between kernel calls");
 			}
+			dotsPrinted = updatePercentageComplete(seq_index+1, *num_sequences, dotsPrinted);
 		}
        	        for(int currDevice = 0; currDevice < deviceCount; currDevice++){
 			size_t seq_index = seq_swath_start + currDevice;

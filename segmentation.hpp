@@ -462,8 +462,10 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
                                gpu_rawseq_lengths[currDevice], samples_per_block, maximum_k_per_subtask, min_segment_length, maxSharedMemoryPerBlockOptin, k_seg_path_working_buffer[currDevice], 
                                all_segmentation_results);  CUERR("Launching sequence segmentation");
 	}
+	int dotsPrinted = 0; // gimpy here as granularity is # devices not actual jobs, but it's better than nothing?
 	for(int currDevice = 0; currDevice < deviceCount; currDevice++){
 		cudaStreamSynchronize(dev_stream[currDevice]); CUERR("Synchronizing CUDA device after sequence segmentation");
+		dotsPrinted = updatePercentageComplete(currDevice+1, deviceCount, dotsPrinted);
 		cudaStreamDestroy(dev_stream[currDevice]); CUERR("Destroying now-redundant CUDA device stream that was used for sequence segmentation");
 		for(int i = 0; i < num_seqs; i++){
 			if(rawseq_ptrs[currDevice][i] != 0){
