@@ -475,7 +475,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 #if DEBUG == 1
 	int maxRounds = 1;
 #else
-	int maxRounds = 1; // PG: tmp
+	int maxRounds = 1000; 
 #endif
 	cudaSetDevice(0);
 	for (int i = 0; i < maxRounds; i++) {
