@@ -37,6 +37,15 @@ openDBA.o: openDBA.cu openDBA.cuh segmentation.hpp cpu_utils.hpp gpu_utils.hpp i
 
 plugins: vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so
 
+tests/openDBA_test.o: tests/openDBA_test.cu openDBA.cuh segmentation.hpp cpu_utils.hpp gpu_utils.hpp io_utils.hpp exit_codes.hpp dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
+	nvcc -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
+
+tests/openDBA_test: Makefile tests/openDBA_test.o multithreading.o fastcluster.o
+	nvcc $(NVCC_FLAGS) --compiler-options -fPIC tests/openDBA_test.o multithreading.o fastcluster.o -o tests/openDBA_test
+
+tests: tests/openDBA_test
+	cd tests; ./openDBA_test
+
 vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so:
 	git submodule update --init --recursive ;\
 	mkdir -f vendor/plugins/vbz_compression/build ;\

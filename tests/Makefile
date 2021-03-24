@@ -61,5 +61,5 @@ fastcluster.o: ../fastcluster.cpp
 openDBA.o: openDBA_test.cu ../openDBA.cuh ../segmentation.hpp ../cpu_utils.hpp ../gpu_utils.hpp ../io_utils.hpp ../exit_codes.hpp ../dtw.hpp ../dba.hpp ../limits.hpp ../cuda_utils.hpp
 	nvcc -std=c++11 -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
 	
-openDBA_test: openDBA_test.cu Makefile openDBA.o multithreading.o fastcluster.o
+openDBA_test: openDBA_test.cu test_utils.cuh Makefile openDBA.o multithreading.o fastcluster.o
 	nvcc -std=c++11 $(NVCC_FLAGS) --compiler-options -fPIC openDBA.o multithreading.o fastcluster.o -o openDBA_test
