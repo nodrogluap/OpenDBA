@@ -49,9 +49,6 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 	// To save on space while still calculating all possible DTW paths, we process all DTWs for one sequence at the same time.
         // So allocate space for the dtwCost to get to each point on the border between grid vertical swaths of the total cost matrix.
 	int dotsPrinted = 0;
-	std::cerr << "Step 2 of 3: Finding initial medoid amongst the " << num_sequences << " sequences" << std::endl;
-	std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
-	char spinner[4] = { '|', '/', '-', '\\'};
 	for(size_t seq_index = 0; seq_index < num_sequences-1; seq_index++){
 		int currDevice = seq_index%deviceCount;
 		cudaSetDevice(currDevice);
@@ -75,15 +72,7 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 			//std::cerr << "Waiting for memory to be freed before launching " << std::endl;
 			cudaMemGetInfo(&freeGPUMem, &totalGPUMem);
 		}
-		int newDotTotal = 100*((float) seq_index/(num_sequences-2));
-		if(newDotTotal > dotsPrinted){
-			for(; dotsPrinted < newDotTotal; dotsPrinted++){
-				std::cerr << "\b.|";
-			}
-		}
-		else{
-			std::cerr << "\b" << spinner[seq_index%4];
-		}
+		dotsPrinted = updatePercentageComplete(seq_index+1, num_sequences-1, dotsPrinted);
 		T *dtwCostSoFar = 0;
 		T *newDtwCostSoFar = 0;
 		cudaMallocManaged(&dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values");
@@ -259,8 +248,6 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
         // Allocate space for the dtwCost to get to each point on the border between grid vertical swaths of the total cost matrix against the consensus C.
 	// Generate the path matrix though for each sequence relative to the centroid, and update the centroid means accordingly.
 	int dotsPrinted = 0;
-	std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
-	char spinner[4] = { '|', '/', '-', '\\'};
         for(size_t seq_index = 0; seq_index <= num_sequences-1; seq_index++){
                 dim3 threadblockDim(maxThreads[0], 1, 1); //TODO: parallelize across devices
                 size_t current_seq_length = sequence_lengths[seq_index];
@@ -287,15 +274,7 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
                         cudaMemGetInfo(&freeGPUMem, &totalGPUMem);
                 }
 
-                int newDotTotal = 100*((float) seq_index/(num_sequences-1));
-                if(newDotTotal > dotsPrinted){
-                        for(; dotsPrinted < newDotTotal; dotsPrinted++){
-                                std::cerr << "\b.|";
-                        }
-                }
-                else{
-                        std::cerr << "\b" << spinner[seq_index%4];
-                }
+		dotsPrinted = updatePercentageComplete(seq_index+1, num_sequences, dotsPrinted);
 
 		T *dtwCostSoFar = 0;
 		T *newDtwCostSoFar = 0;
@@ -478,7 +457,9 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	if(norm_sequences) normalizeSequences(gpu_sequences, maxLength, num_sequences, gpu_sequence_lengths, -1, stream);
 
         // Pick a seed sequence from the original input, with the smallest L2 norm.
+	setupPercentageDisplay("Step 2 of 3: Finding initial medoid");
 	size_t medoidIndex = approximateMedoidIndex(gpu_sequences, maxLength, num_sequences, sequence_lengths, sequence_names, gpu_sequence_lengths, use_open_start, use_open_end, output_prefix, stream);
+	teardownPercentageDisplay();	
         size_t medoidLength = sequence_lengths[medoidIndex];
 	std::cerr << std::endl << "Initial medoid " << sequence_names[medoidIndex] << " has length " << medoidLength << std::endl;
 	T *gpu_barycenter = 0;
@@ -496,8 +477,9 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 #endif
 	cudaSetDevice(0);
 	for (int i = 0; i < maxRounds; i++) {
-		std::cerr << std::endl << "Step 3 of 3 (round " << (i+1) << " of max " << maxRounds << " to achieve delta 0): Converging centroid" << std::endl;
+		setupPercentageDisplay("Step 3 of 3 (round " + std::to_string(i+1) +  " of max " + std::to_string(maxRounds) + " to achieve delta 0): Converging centroid");
 		double delta = DBAUpdate(gpu_barycenter, medoidLength, gpu_sequences[0], maxLength, num_sequences, sequence_lengths, gpu_sequence_lengths[0], use_open_start, use_open_end, new_barycenter, stream);
+		teardownPercentageDisplay();
 		std::cerr << std::endl << "New delta is " << delta << std::endl;
 		if(delta == 0){
 			break;
