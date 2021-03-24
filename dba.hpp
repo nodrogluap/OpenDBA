@@ -1,8 +1,6 @@
 #ifndef __dba_hpp_included
 #define __dba_hpp_included
 
-//#include <chrono>
-//#include <thread>
 #include <thrust/sort.h>
 #include <iostream>
 #include <fstream>
@@ -16,7 +14,6 @@
 	#include <unistd.h>
 #endif
 
-#include "multithreading.h"
 #include "exit_codes.hpp"
 #include "gpu_utils.hpp"
 #include "io_utils.hpp"
@@ -26,59 +23,14 @@
 
 #define ARITH_SERIES_SUM(n) (((n)*(n+1))/2)
 
-using namespace cudahack;
-
-struct heterogeneous_workload {
-    void *dtwCostSoFar_memptr; // we only free it, so datatype templating is not neccesary
-    void *newDtwCostSoFar_memptr; // we only free it, so datatype templating is not neccesary
-    unsigned char *pathMatrix_memptr;
-    cudaStream_t stream;
-};
-
-__host__
-CUT_THREADPROC dtwStreamCleanup(void *void_arg){
-	heterogeneous_workload *workload = (heterogeneous_workload *) void_arg;
-	// ... GPU is done with processing, continue on new CPU thread...
-
-	// Free dynamically allocated resources that were associated with data processing done in the stream.
-	//std::cerr << "Freeing memory" << std::endl;
-	if(workload->dtwCostSoFar_memptr != 0){
-		cudaFree(workload->dtwCostSoFar_memptr); CUERR("Freeing DTW intermediate cost values");
-	}
-	if(workload->newDtwCostSoFar_memptr != 0){
-		cudaFree(workload->newDtwCostSoFar_memptr); CUERR("Freeing new DTW intermediate cost values");
-	}
-	if(workload->pathMatrix_memptr != 0){
-		cudaFree(workload->pathMatrix_memptr); CUERR("Freeing DTW path matrix");
-	}
-	cudaStreamDestroy(workload->stream); CUERR("Removing a CUDA stream after completion");
-        cudaFreeHost(workload); CUERR("Freeing host memory for dtwStreamCleanup");
-
-	CUT_THREADEND;
-}
-
-__host__
-void CUDART_CB dtwStreamCleanupLaunch(cudaStream_t stream, cudaError_t status, void *streamResources) {
-	// Check status of GPU after stream operations are done. Die if there was a failure.
-	CUERR("On callback after DTWDistance calculations completed.");
-
-	// Spawn new CPU worker thread and perform stream resource cleanup on the CPU (since calling the CUDA API from within this callback is not allowed according to the docs).
-	cutStartThread(dtwStreamCleanup, streamResources);
-}
+using namespace cudahack; // for device-side numeric limits
 
 template<typename T>
 __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size_t num_sequences, size_t *sequence_lengths, char **sequence_names, size_t **gpu_sequence_lengths, int use_open_start, int use_open_end, char *output_prefix, cudaStream_t stream) {
 	int deviceCount;
  	cudaGetDeviceCount(&deviceCount); CUERR("Getting GPU device count in medoid approximation method");
 
-	unsigned int *maxThreads;
-	cudaMallocHost(&maxThreads, sizeof(unsigned int)*deviceCount); CUERR("Allocating CPU memory for CUDA device properties");
-	cudaDeviceProp deviceProp;
-	for(int i = 0; i < deviceCount; i++){
-		cudaGetDeviceProperties(&deviceProp, i); CUERR("Getting GPU device properties");
-		maxThreads[i] = deviceProp.maxThreadsPerBlock;
-	}
-	//std::cerr << "Maximum of " << maxThreads[0] << " threads per block on device 0" << std::endl;
+	unsigned int *maxThreads = getMaxThreadsPerDevice(deviceCount); // from cuda_utils.hpp
 
 	T **gpu_dtwPairwiseDistances = 0;
 	cudaMallocHost(&gpu_dtwPairwiseDistances,sizeof(T *)*deviceCount);  CUERR("Allocating CPU memory for GPU DTW pairwise distances' pointers");
@@ -103,12 +55,7 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 	for(size_t seq_index = 0; seq_index < num_sequences-1; seq_index++){
 		int currDevice = seq_index%deviceCount;
 		cudaSetDevice(currDevice);
-#ifdef DEBUG
-		// When debugging, kernel calls take more resources and running the full complement of threads causes runtime kernel launch failures.
-        	dim3 threadblockDim(maxThreads[currDevice]/4, 1, 1);
-#else
         	dim3 threadblockDim(maxThreads[currDevice], 1, 1);
-#endif
         	dim3 gridDim((num_sequences-seq_index-1), 1, 1);
 		size_t current_seq_length = sequence_lengths[seq_index];
 		// We are allocating each time rather than just once at the start because if the sequences have a large
@@ -159,15 +106,9 @@ __host__ int approximateMedoidIndex(T **gpu_sequences, size_t maxSeqLength, size
 		}
 		// Will cause memory to be freed in callback after seq DTW completion, so the sleep_for() polling above can 
 		// eventually release to launch more kernels as free memory increases (if it's not already limited by the kernel grid block queue).
-		heterogeneous_workload *cleanup_workload = 0;
-		cudaMallocHost(&cleanup_workload, sizeof(heterogeneous_workload)); CUERR("Allocating page locked CPU memory for DTW stream callback data");
-		cleanup_workload->dtwCostSoFar_memptr = dtwCostSoFar;
-		cleanup_workload->newDtwCostSoFar_memptr = newDtwCostSoFar;
-		cleanup_workload->pathMatrix_memptr = 0;
-		cleanup_workload->stream = seq_stream;
-		cudaStreamAddCallback(seq_stream, dtwStreamCleanupLaunch, cleanup_workload, 0);
+		addStreamCleanupCallback(dtwCostSoFar, newDtwCostSoFar, 0, seq_stream);
 	}
-        cudaFreeHost(maxThreads);
+        cudaFreeHost(maxThreads); CUERR("Freeing CPU memory for device thread properties");
 	// TODO: use a fancy cleanup thread barrier here so that multiple DBAs could be running on the same device and not interfere with each other at this step.
 	for(int i = 0; i < deviceCount; i++){
                 cudaSetDevice(i);
@@ -302,12 +243,9 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
         cudaMallocHost(&cpu_centroid, sizeof(T)*centerLength); CUERR("Allocating CPU memory for incoming centroid");
 	cudaMemcpy(cpu_centroid, C, sizeof(T)*centerLength, cudaMemcpyDeviceToHost); CUERR("Copying incoming GPU centroid to CPU");
 
-        // int dev = 0;
-        // cudaDeviceProp deviceProp;
-        // cudaGetDeviceProperties(&deviceProp, dev); CUERR("Getting GPU device properties");
-
-        // unsigned int maxThreads = deviceProp.maxThreadsPerBlock;
-        unsigned int maxThreads = CUDA_THREADBLOCK_MAX_THREADS;
+	int deviceCount;
+        cudaGetDeviceCount(&deviceCount); CUERR("Getting GPU device count in DBA update function");
+        unsigned int *maxThreads = getMaxThreadsPerDevice(deviceCount);
 
 	unsigned int *nElementsForMean, *cpu_nElementsForMean;
 	cudaMallocManaged(&nElementsForMean, sizeof(unsigned int)*centerLength); CUERR("Allocating GPU memory for barycenter update sequence pileup");
@@ -324,7 +262,7 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 	std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
 	char spinner[4] = { '|', '/', '-', '\\'};
         for(size_t seq_index = 0; seq_index <= num_sequences-1; seq_index++){
-                dim3 threadblockDim(maxThreads/4, 1, 1);
+                dim3 threadblockDim(maxThreads[0], 1, 1); //TODO: parallelize across devices
                 size_t current_seq_length = sequence_lengths[seq_index];
                 // We are allocating each time rather than just once at the start because if the sequences have a large
                 // range of lengths and we sort them from shortest to longest we will be allocating the minimum amount of
@@ -466,14 +404,9 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
 		updateCentroid<<<1,1,0,seq_stream>>>(sequences+maxSeqLength*seq_index, gpu_centroidAlignmentSums, nElementsForMean, pathMatrix, centerLength, current_seq_length, pathPitch, flip_seq_order);
                 // Will cause memory to be freed in callback after seq DTW completion, so the sleep_for() polling above can
                 // eventually release to launch more kernels as free memory increases (if it's not already limited by the kernel grid block queue).
-                heterogeneous_workload *cleanup_workload = 0;
-                cudaMallocHost(&cleanup_workload, sizeof(heterogeneous_workload)); CUERR("Allocating page locked CPU memory for DTW stream callback data");
-                cleanup_workload->dtwCostSoFar_memptr = dtwCostSoFar;
-                cleanup_workload->newDtwCostSoFar_memptr = newDtwCostSoFar;
-                cleanup_workload->pathMatrix_memptr = pathMatrix;
-                cleanup_workload->stream = seq_stream;
-                cudaStreamAddCallback(seq_stream, dtwStreamCleanupLaunch, cleanup_workload, 0);
+		addStreamCleanupCallback(dtwCostSoFar, newDtwCostSoFar, pathMatrix, seq_stream);
         }
+	cudaFreeHost(maxThreads); CUERR("Freeing CPU memory for device thread properties");
 	// TODO: use a fancy cleanup thread barrier here so that multiple DBAs could be running on the same device and not interfere with each other at this step.
         cudaDeviceSynchronize(); CUERR("Synchronizing CUDA device after all DTW calculations");
 
@@ -558,7 +491,9 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	}
 
 	cudaStreamSynchronize(stream); CUERR("Synchronizing the CUDA stream after sequences' copy to GPU");
-	//std::cerr << "Normalizing " << num_sequences << " input streams (longest is " << maxLength << ")" << std::endl;
+#if DEBUG == 1
+	std::cerr << "Normalizing " << num_sequences << " input streams (longest is " << maxLength << ")" << std::endl;
+#endif
 	if(norm_sequences) normalizeSequences(gpu_sequences, maxLength, num_sequences, gpu_sequence_lengths, -1, stream);
 
         // Pick a seed sequence from the original input, with the smallest L2 norm.
@@ -566,7 +501,6 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
         size_t medoidLength = sequence_lengths[medoidIndex];
 	std::cerr << std::endl << "Initial medoid " << sequence_names[medoidIndex] << " has length " << medoidLength << std::endl;
 	T *gpu_barycenter = 0;
-	cudaSetDevice(0);
 	cudaMallocManaged(&gpu_barycenter, sizeof(T)*medoidLength); CUERR("Allocating GPU memory for DBA result");
         cudaMemcpyAsync(gpu_barycenter, gpu_sequences[0]+maxLength*medoidIndex, medoidLength*sizeof(T), cudaMemcpyDeviceToDevice, stream);  CUERR("Copying medoid seed to GPU memory");
 
@@ -672,23 +606,14 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
                 cudaSetDevice(i);
                 cudaDeviceSynchronize(); CUERR("Synchronizing CUDA device after sequence copy to GPU for chopping");
         }
-    if(norm_sequences) normalizeSequences(gpu_sequences, maxLength, *num_sequences, gpu_sequence_lengths, -1, stream); CUERR("Normalizing input sequences for prefix chopping");
-	if(norm_sequences) normalizeSequence(gpu_sequence_prefixs, sequence_prefix_length, stream); CUERR("Normalizing sequence prefix for chopping");
+    	if(norm_sequences){
+	       	normalizeSequences(gpu_sequences, maxLength, *num_sequences, gpu_sequence_lengths, -1, stream); CUERR("Normalizing input sequences for prefix chopping");
+		normalizeSequence(gpu_sequence_prefixs, sequence_prefix_length, stream); CUERR("Normalizing sequence prefix for chopping");
+	}
 	size_t *chopPositions = 0;
 	cudaMallocHost(&chopPositions, sizeof(size_t)*(*num_sequences)); CUERR("Allocating CPU memory for sequence prefix chopping locations");
 
-        unsigned int *maxThreads;
-        cudaMallocHost(&maxThreads, sizeof(unsigned int)*deviceCount); CUERR("Allocating CPU memory for CUDA device properties");
-        cudaDeviceProp deviceProp;
-        for(int i = 0; i < deviceCount; i++){
-                cudaGetDeviceProperties(&deviceProp, i); CUERR("Getting GPU device properties");
-#if DEBUG == 1
-		maxThreads[i] = deviceProp.maxThreadsPerBlock/4;
-#else
-                maxThreads[i] = deviceProp.maxThreadsPerBlock;
-#endif
-        }
-        //std::cerr << "Maximum of " << maxThreads[0] << " threads per block on device 0" << std::endl;
+        unsigned int *maxThreads = getMaxThreadsPerDevice(deviceCount);
 
         // Declared sentinels to add semantics to DTWDistance call params.
         // A lot of DTW kernel parameters are ignored because we are launching without a real grid, so vars to infer 
@@ -776,7 +701,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
                 	cudaMallocHost(&cpu_pathMatrix, sizeof(unsigned char)*pathPitch*sequence_prefix_length); CUERR("Allocating host memory for prefix DTW path matrix copy");
                 	cudaMemcpy(cpu_pathMatrix, pathMatrixs[currDevice], sizeof(unsigned char)*pathPitch*sequence_prefix_length, cudaMemcpyDeviceToHost); CUERR("Copying prefix DTW path matrix from device to host");
 #if DEBUG == 1
-//			writeDTWPathMatrix(pathMatrixs[currDevice], (std::string("prefixchop_costmatrix")+std::to_string(seq_index)).c_str(), columnLimit+1, rowLimit+1, pathPitch);
+			writeDTWPathMatrix(pathMatrixs[currDevice], (std::string("prefixchop_costmatrix")+std::to_string(seq_index)).c_str(), columnLimit+1, rowLimit+1, pathPitch);
 #endif
 			cudaFree(pathMatrixs[currDevice]);
 
@@ -803,6 +728,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
                 	cudaFreeHost(cpu_pathMatrix);
         	}
 	}
+	cudaFreeHost(maxThreads); CUERR("Freeing CPU memory for device thread properties");
 	cudaFreeHost(seq_streams); CUERR("Freeing CPU memory for prefix chopping CUDA streams");
 	cudaFreeHost(dtwCostSoFars); CUERR("Freeing CPU memory for prefix chopping DTW cost intermediate values");
 	cudaFreeHost(pathMatrixs); CUERR("Freeing CPU memory for prefix chopping DTW path matrices");
