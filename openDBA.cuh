@@ -105,8 +105,8 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 		}
 	}
 	cudaFreeHost(series_file_names); CUERR("Freeing CPU memory for the sequence names array");
-	cudaFreeHost(sequences); CUERR("Freeing CPU memory for the segmented sequence pointers");
-	cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the segmented sequence lengths");
+	cudaFreeHost(sequences); CUERR("Freeing CPU memory for the sequence pointers");
+	cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the sequence lengths");
 	cudaFreeHost(averageSequence); CUERR("Freeing CPU memory for the DBA result");
 }
 
