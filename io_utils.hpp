@@ -35,10 +35,7 @@ writeSequences(T **cpu_sequences, size_t *seq_lengths, char **seq_names, int num
 
 template<typename T>
 __host__
-int writeDTWPathMatrix(unsigned char **cpu_stepMatrix, unsigned char *um_pathMatrix, const char *step_filename, size_t num_columns, size_t num_rows, size_t pathPitch){
-
-	
-	//T *cpu_costMatrix = 0;
+int writeDTWPathMatrix(unsigned char *cpu_stepMatrix, const char *step_filename, size_t num_columns, size_t num_rows, size_t pathPitch){
 	
 	std::ofstream step(step_filename);
 	if(!step.is_open()){
@@ -46,27 +43,21 @@ int writeDTWPathMatrix(unsigned char **cpu_stepMatrix, unsigned char *um_pathMat
 		return CANNOT_WRITE_DTW_PATH_MATRIX;
 	}	
 	
-	cudaMallocHost(cpu_stepMatrix, sizeof(unsigned char)*pathPitch*(num_rows+1)); CUERR("Allocating CPU memory for step matrix");
-	// Copy the data from unified memory (could be GPU or CPU)
-	cudaMemcpy((*cpu_stepMatrix), um_pathMatrix, sizeof(unsigned char)*pathPitch*(num_rows+1), cudaMemcpyDeviceToHost);  CUERR("Copying GPU to CPU memory for step matrix");
-	
 	for(int i = 0; i < num_rows; i++){
 		for(int j = 0; j < num_columns; j++){
-			unsigned char move = (*cpu_stepMatrix)[pitchedCoord(j,i,pathPitch)];
+			unsigned char move = cpu_stepMatrix[pitchedCoord(j,i,pathPitch)];
 			step << (move == DIAGONAL ? "D" : (move == RIGHT ? "R" : (move == UP ? "U" : (move == OPEN_RIGHT ?  "O" : (move == NIL || move == NIL_OPEN_RIGHT ? "N" : "?")))));
 		}
 		step << std::endl;
 	}
 	step.close();
 	
-	// cudaFreeHost(cpu_stepMatrix);
-	//cudaFreeHost(cpu_costMatrix);
 	return 0;
 }
 
 template <typename T>
 __host__
-int writeDTWPath(unsigned char *um_pathMatrix, char *filename, T *gpu_seq, size_t gpu_seq_len, T *cpu_centroid, size_t cpu_centroid_len, size_t num_columns, size_t num_rows, size_t pathPitch, int flip_seq_order){
+int writeDTWPath(unsigned char *cpu_pathMatrix, const char *filename, T *gpu_seq, size_t gpu_seq_len, T *cpu_centroid, size_t cpu_centroid_len, size_t num_columns, size_t num_rows, size_t pathPitch, int flip_seq_order){
 	std::ofstream path(filename);
 	if(!path.is_open()){
         	std::cerr << "Cannot write to " << filename << std::endl;
@@ -74,12 +65,8 @@ int writeDTWPath(unsigned char *um_pathMatrix, char *filename, T *gpu_seq, size_
 	}
 
 	T *cpu_seq;
-	cudaMallocHost(&cpu_seq, sizeof(T)*gpu_seq_len); CUERR("Allocating CPU memory for query seq");
-	cudaMemcpy(cpu_seq, gpu_seq, sizeof(T)*gpu_seq_len, cudaMemcpyDeviceToHost); CUERR("Copying incoming GPU query to CPU");
-        unsigned char *cpu_pathMatrix = 0;
-        cudaMallocHost(&cpu_pathMatrix, sizeof(unsigned char)*pathPitch*(num_rows));
-        // Copy the data from unified memory (could be GPU or CPU)
-        cudaMemcpy(cpu_pathMatrix, um_pathMatrix, sizeof(unsigned char)*pathPitch*(num_rows), cudaMemcpyDeviceToHost);
+	cudaMallocHost(&cpu_seq, sizeof(T)*gpu_seq_len); CUERR("Allocating CPU memory for query seq in DTW path printing");
+	cudaMemcpy(cpu_seq, gpu_seq, sizeof(T)*gpu_seq_len, cudaMemcpyDeviceToHost); CUERR("Copying incoming GPU query to CPU in DTW path printing");
 
 	// moveI and moveJ are defined device-side in dtw.hpp, but we are host side so we need to replicate
 	int moveI[] = { -1, -1, 0, -1, 0 };
@@ -99,7 +86,7 @@ int writeDTWPath(unsigned char *um_pathMatrix, char *filename, T *gpu_seq, size_
         	move = cpu_pathMatrix[pitchedCoord(j,i,pathPitch)];
 	}
 	path.close();
-	cudaFreeHost(cpu_pathMatrix);
+	cudaFreeHost(cpu_seq); CUERR("Freeing CPU memory for query seq in DTW path printing");
 	return 0;
 }
 

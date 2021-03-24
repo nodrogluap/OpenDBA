@@ -358,53 +358,34 @@ DBAUpdate(T *C, size_t centerLength, T *sequences, size_t maxSeqLength, size_t n
                 }
 #if DEBUG == 1
 		cost.close();
+#endif
 		/* Start of debugging code, which saves the DTW path for each sequence vs. consensus. Requires C++11 compatibility. */
 		cudaStreamSynchronize(seq_stream);
-		T *cpu_seq;
-		cudaMallocHost(&cpu_seq, sizeof(T)*current_seq_length); CUERR("Allocating CPU memory for query seq");
-		cudaMemcpy(cpu_seq, sequences+seq_index*maxSeqLength, sizeof(T)*current_seq_length, cudaMemcpyDeviceToHost); CUERR("Copying incoming GPU query to CPU");
-		
-		std::string step_filename = std::string("stepmatrix")+std::to_string(seq_index);
-		
-		int columnLimit = centerLength - 1;
-		int rowLimit = current_seq_length - 1;
-		if(flip_seq_order){int tmp = rowLimit; rowLimit = columnLimit; columnLimit = tmp;}
-		
-		unsigned char *cpu_stepMatrix = 0;
-		
-		writeDTWPathMatrix<T>(&cpu_stepMatrix, pathMatrix, step_filename.c_str(), columnLimit, rowLimit, pathPitch);
-		
-		std::ofstream path((std::string("path")+std::to_string(seq_index)).c_str());
-		if(!path.is_open()){
-			std::cerr << "Cannot write to path" << seq_index << std::endl;
-			exit(4);
-		}
-		// moveI and moveJ are defined device-side in dtw.hpp, but we are host side so we need to replicate
-		int moveI[] = { -1, -1, 0, -1, 0 };
-		int moveJ[] = { -1, -1, -1, 0, -1 };
-        	int j = columnLimit;
-        	int i = rowLimit;
-        	unsigned char move = cpu_stepMatrix[pitchedCoord(j,i,pathPitch)];
-        	while (move != NIL && move != NIL_OPEN_RIGHT) {
-			if(flip_seq_order){
-				path << j << "\t" << cpu_seq[j] << "\t" << i << "\t" << cpu_centroid[i] << "\t" << (move == DIAGONAL ? "DIAG" : (move == RIGHT ? "RIGHT" : (move == UP ? "UP" : (move==OPEN_RIGHT ?  "OPEN_RIGHT" : (move ==NIL ? "NIL" : "?")))))<< std::endl;
-			}
-			else{
-				path << i << "\t" << cpu_seq[i] << "\t" << j << "\t" << cpu_centroid[j] << "\t" << (move == DIAGONAL ? "DIAG" : (move == RIGHT ? "RIGHT" : (move == UP ? "UP" : (move==OPEN_RIGHT ?  "OPEN_RIGHT" : (move ==NIL ? "NIL" : "?")))))<< std::endl;
-			}
-                        i += moveI[move];
-                        j += moveJ[move];
-                        move = cpu_stepMatrix[pitchedCoord(j,i,pathPitch)];
-		}
-		path.close();
-		cudaFreeHost(cpu_stepMatrix);
-		cudaFreeHost(cpu_seq);
-		/* end of debugging code */
-#endif
+
 		updateCentroid<<<1,1,0,seq_stream>>>(sequences+maxSeqLength*seq_index, gpu_centroidAlignmentSums, nElementsForMean, pathMatrix, centerLength, current_seq_length, pathPitch, flip_seq_order);
                 // Will cause memory to be freed in callback after seq DTW completion, so the sleep_for() polling above can
                 // eventually release to launch more kernels as free memory increases (if it's not already limited by the kernel grid block queue).
 		addStreamCleanupCallback(dtwCostSoFar, newDtwCostSoFar, pathMatrix, seq_stream);
+		
+		int num_columns = centerLength;
+		int num_rows = current_seq_length;
+		if(flip_seq_order){int tmp = num_rows; num_rows = num_columns; num_columns = tmp;}
+		
+		unsigned char *cpu_stepMatrix = 0;
+		
+	        cudaMallocHost(&cpu_stepMatrix, sizeof(unsigned char)*pathPitch*num_rows); CUERR("Allocating CPU memory for step matrix");
+        	cudaMemcpy(cpu_stepMatrix, pathMatrix, sizeof(unsigned char)*pathPitch*num_rows, cudaMemcpyDeviceToHost);  CUERR("Copying GPU to CPU memory for step matrix");
+
+#if DEBUG == 1
+		std::string step_filename = std::string("stepmatrix")+std::to_string(seq_index);
+		writeDTWPathMatrix<T>(cpu_stepMatrix, step_filename.c_str(), num_columns, num_rows, pathPitch);
+#endif
+		
+		std::string path_filename = std::string("path")+std::to_string(seq_index);
+		writeDTWPath(cpu_stepMatrix, path_filename.c_str(), sequences+seq_index*maxSeqLength, current_seq_length, cpu_centroid, centerLength, num_columns, num_rows, pathPitch, flip_seq_order);
+		cudaFreeHost(cpu_stepMatrix);
+		/* end of debugging code */
+
         }
 	cudaFreeHost(maxThreads); CUERR("Freeing CPU memory for device thread properties");
 	// TODO: use a fancy cleanup thread barrier here so that multiple DBAs could be running on the same device and not interfere with each other at this step.
@@ -701,7 +682,7 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
                 	cudaMallocHost(&cpu_pathMatrix, sizeof(unsigned char)*pathPitch*sequence_prefix_length); CUERR("Allocating host memory for prefix DTW path matrix copy");
                 	cudaMemcpy(cpu_pathMatrix, pathMatrixs[currDevice], sizeof(unsigned char)*pathPitch*sequence_prefix_length, cudaMemcpyDeviceToHost); CUERR("Copying prefix DTW path matrix from device to host");
 #if DEBUG == 1
-			writeDTWPathMatrix(pathMatrixs[currDevice], (std::string("prefixchop_costmatrix")+std::to_string(seq_index)).c_str(), columnLimit+1, rowLimit+1, pathPitch);
+			//writeDTWPathMatrix(pathMatrixs[currDevice], (std::string("prefixchop_costmatrix")+std::to_string(seq_index)).c_str(), columnLimit+1, rowLimit+1, pathPitch);
 #endif
 			cudaFree(pathMatrixs[currDevice]);
 
