@@ -48,7 +48,7 @@ tests: tests/openDBA_test
 
 vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so:
 	git submodule update --init --recursive ;\
-	mkdir -f vendor/plugins/vbz_compression/build ;\
+	mkdir -p vendor/plugins/vbz_compression/build ;\
 	cd vendor/plugins/vbz_compression/build ;\
 	cmake -D CMAKE_BUILD_TYPE=Release -D ENABLE_CONAN=OFF -D ENABLE_PERF_TESTING=OFF -D ENABLE_PYTHON=OFF .. ;\
 	make
