@@ -80,8 +80,23 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 		setupPercentageDisplay("Opt-in Step: Segmenting with minimum acceptable segment size of " + std::to_string(min_segment_length));
 		adaptive_segmentation<T>(sequences, sequence_lengths, actual_num_series, min_segment_length, &segmented_sequences, &segmented_seq_lengths);
 		teardownPercentageDisplay();
+		for (int i = 0; i < actual_num_series; i++){ 
+			cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a presegmentation sequence");
+			// Sequences of length 1 are problematic as there is no meaningful warp to be performed, and they are almost certain to become the initial medoid.
+			// We therefore eliminate them.
+			if(segmented_seq_lengths[i] < 2){
+				std::cerr << "Removing segmented sequence '" << series_file_names[i] << "' of length " << segmented_seq_lengths[i]
+					  << " as it may unduly skew the convergence process. To retain this sequence, consider setting a smaller minimum segment size (currently " 
+					  << min_segment_length << ")" << std::endl;
+				cudaFree(segmented_sequences[i]); CUERR("Freeing CPU memory for a discarded post-segmentation sequence");
+				for (int j = i + 1; j < actual_num_series; j++){ 
+					segmented_sequences[j-1] = segmented_sequences[j]; // TODO: use memmove() instead?
+					segmented_seq_lengths[j-1] = segmented_seq_lengths[j];
+				}
+				actual_num_series--;
+			}
+		}
 		writeSequences(segmented_sequences, segmented_seq_lengths, series_file_names, actual_num_series, CONCAT2(output_prefix, ".segmented_seqs.txt").c_str());
-		for (int i = 0; i < actual_num_series; i++){ cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a presegmentation sequence");}
 		cudaFreeHost(sequences); CUERR("Freeing CPU memory for the presegmentation sequence pointers");
 		cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the presegmentation sequence lengths");
 		sequences = segmented_sequences;
