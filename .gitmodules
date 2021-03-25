@@ -1,0 +1,3 @@
+[submodule "vendor/plugins/vbz_compression"]
+	path = vendor/plugins/vbz_compression
+	url = https://github.com/nanoporetech/vbz_compression
