@@ -557,7 +557,26 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
         }
 
 	for(int currCluster = 0; currCluster < num_clusters; currCluster++){
+		int num_members = 0;
+		for (int i = 0; i < num_sequences; i++) {
+                	if(sequences_membership[i] == currCluster){
+                       		num_members++;
+			}
+                }
+
         	size_t medoidLength = sequence_lengths[medoidIndices[currCluster]];
+		// Special case is when a cluster contains only one sequence, where we don't need to do anythiong except output the sequence as is.
+		if(num_members == 1){
+			std::cerr << "Outputting singleton sequence " << sequence_names[medoidIndices[currCluster]] << 
+				     " as-is (a.k.a. cluster " << (currCluster+1) << "/" << num_clusters << ")." << std::endl;
+			avgs_file << sequence_names[medoidIndices[currCluster]];
+        		for (size_t i = 0; i < medoidLength; ++i) { 
+				avgs_file << "\t" << (sequences[medoidIndices[currCluster]])[i]; 
+			}
+			avgs_file << std::endl;
+			continue;
+		}
+
 		T *gpu_barycenter = 0;
 		cudaMallocManaged(&gpu_barycenter, sizeof(T)*medoidLength); CUERR("Allocating GPU memory for DBA result");
         	cudaMemcpyAsync(gpu_barycenter, sequences[medoidIndices[currCluster]], medoidLength*sizeof(T), cudaMemcpyDeviceToDevice, stream);  CUERR("Copying medoid seed to GPU memory");
@@ -566,12 +585,6 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		T *new_barycenter = 0;
 		cudaMallocHost(&new_barycenter, sizeof(T)*medoidLength); CUERR("Allocating CPU memory for DBA update result");
 
-		int num_members = 0;
-		for (int i = 0; i < num_sequences; i++) {
-                	if(sequences_membership[i] == currCluster){
-                       		num_members++;
-			}
-                }
 		std::cerr << "Processing cluster " << (currCluster+1) << " of " << num_clusters << ", " << 
 			  num_members << " members, initial medoid " << sequence_names[medoidIndices[currCluster]] << " has length " << medoidLength << std::endl;
 		// Allocate storage for an array of pointers to just the sequences from this cluster, so we generate averages for each cluster independently
