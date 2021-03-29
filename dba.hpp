@@ -190,26 +190,27 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 
 	T *clusterDtwSoS = num_clusters == 1 ? dtwSoS : new T[num_sequences]; // will use some portion of this max for each cluster
 	for(int currCluster = 0; currCluster < num_clusters; currCluster++){
-		int firstClusterMember = -1;
-		int lastClusterMember = -1;
 		int num_cluster_members = 0;
-		index_offset = 0;
 		for(size_t i = 0; i < num_sequences-1; ++i){
 			if(memberships[i] == currCluster){
-				if(firstClusterMember == -1){
-					firstClusterMember = i;
-				}
-				clusterDtwSoS[num_cluster_members] = 0;
-				for(size_t j = i + 1; j < num_sequences; ++j){
-					if(memberships[j] == currCluster){
-						T paired_distance = cpu_dtwPairwiseDistances[index_offset+j-i-1];
-						clusterDtwSoS[num_cluster_members] += paired_distance*paired_distance;
-					}
-				}
-				lastClusterMember = i;
 				num_cluster_members++;
 			}
-			index_offset += num_sequences - i - 1;
+		}
+		int *clusterIndices = new int[num_cluster_members];
+		int cluster_cursor = 0;
+		for(size_t i = 0; i < num_sequences-1; ++i){
+			if(memberships[i] == currCluster){
+				clusterIndices[cluster_cursor++] = i;
+			}
+		}
+		for(size_t i = 0; i < num_cluster_members - 1; ++i){
+			// Where in the upper right matrix we are i.e. the whole matrix minus what down and to the right of this row's start
+			int index_offset = ARITH_SERIES_SUM(num_sequences)-ARITH_SERIES_SUM(num_sequences - i); 
+			for(size_t j = i + 1; j < num_cluster_members; ++j){
+				T paired_distance = cpu_dtwPairwiseDistances[index_offset+j-i-1];
+				clusterDtwSoS[i] += paired_distance*paired_distance;
+				clusterDtwSoS[j] += paired_distance*paired_distance;
+			}
 		}
 		int medoidIndex = -1;
 		// Pick the smallest squared distance across all the sequences in this cluster.
@@ -217,19 +218,20 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 			T lowestSoS = std::numeric_limits<T>::max();
 			for(size_t i = 0; i < num_cluster_members; ++i){
 				if (clusterDtwSoS[i] < lowestSoS) {
-					medoidIndex = i;
+					medoidIndex = clusterIndices[i];
 					lowestSoS = clusterDtwSoS[i];
 				}
 			}
 		} 
 		else if(num_cluster_members == 2){
 			// Pick the longest sequence that contributed to the cumulative distance if we only have 2 sequences
-			medoidIndex = sequence_lengths[firstClusterMember] > sequence_lengths[lastClusterMember] ? 0 : 1;
+			medoidIndex = sequence_lengths[clusterIndices[0]] > sequence_lengths[clusterIndices[1]] ? clusterIndices[0] : clusterIndices[1];
 		}
 		else{	// Single member cluster
-			medoidIndex = 0;
+			medoidIndex = clusterIndices[0];
 		}
 		medoidIndices[currCluster] = medoidIndex;
+		delete[] clusterIndices;
 	}
 	if(num_clusters != 1){
 		delete[] clusterDtwSoS;
