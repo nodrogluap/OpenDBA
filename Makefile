@@ -23,14 +23,14 @@ endif
 all: $(PROGNAME)
 
 clean:
-	rm -f openDBA.o multithreading.o fastcluster.o $(PROGNAME)
+	rm -f openDBA.o multithreading.o submodules/hclust-cpp/fastcluster.o vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so $(PROGNAME)
 
 # Following two targets are small external libraries with more less restrictive licenses (see headers for license info)
 multithreading.o: multithreading.cpp
 	nvcc -c $< -o $@
 
-fastcluster.o: fastcluster.cpp
-	nvcc -DNO_INCLUDE_FENV -c $< -o $@ 
+submodules/hclust-cpp/fastcluster.o: submodules/hclust-cpp/fastcluster.cpp submodules/hclust-cpp/fastcluster.h
+	nvcc --compiler-options -lstdc++ -c submodules/hclust-cpp/fastcluster.cpp -o $@ 
 
 openDBA.o: openDBA.cu openDBA.cuh segmentation.hpp cpu_utils.hpp gpu_utils.hpp io_utils.hpp exit_codes.hpp dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
 	nvcc -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
@@ -40,8 +40,8 @@ plugins: vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so
 tests/openDBA_test.o: tests/openDBA_test.cu openDBA.cuh segmentation.hpp cpu_utils.hpp gpu_utils.hpp io_utils.hpp exit_codes.hpp dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
 	nvcc -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
 
-tests/openDBA_test: Makefile tests/openDBA_test.o multithreading.o fastcluster.o
-	nvcc $(NVCC_FLAGS) --compiler-options -fPIC tests/openDBA_test.o multithreading.o fastcluster.o -o tests/openDBA_test
+tests/openDBA_test: Makefile tests/openDBA_test.o multithreading.o submodules/hclust-cpp/fastcluster.o
+	nvcc $(NVCC_FLAGS) --compiler-options -fPIC tests/openDBA_test.o multithreading.o submodules/hclust-cpp/fastcluster.o -o tests/openDBA_test
 
 tests: tests/openDBA_test
 	cd tests; ./openDBA_test
@@ -53,6 +53,6 @@ vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so:
 	cmake -D CMAKE_BUILD_TYPE=Release -D ENABLE_CONAN=OFF -D ENABLE_PERF_TESTING=OFF -D ENABLE_PYTHON=OFF .. ;\
 	make
 
-$(PROGNAME): Makefile openDBA.o multithreading.o fastcluster.o
-	nvcc $(NVCC_FLAGS) --compiler-options -fPIC openDBA.o multithreading.o fastcluster.o -o $(PROGNAME)
+$(PROGNAME): Makefile openDBA.o multithreading.o submodules/hclust-cpp/fastcluster.o
+	nvcc $(NVCC_FLAGS) --compiler-options -fPIC openDBA.o multithreading.o submodules/hclust-cpp/fastcluster.o -o $(PROGNAME)
 

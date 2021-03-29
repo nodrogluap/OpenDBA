@@ -19,16 +19,14 @@
 
 template<typename T>
 void
-setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length, int norm_sequences);
+setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length, int norm_sequences, double cdist);
 
 template<typename T>
 void
-setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length, int norm_sequences){
+setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length, int norm_sequences, double cdist){
 	size_t *sequence_lengths = 0;
-	size_t averageSequenceLength = 0;
 	T **segmented_sequences = 0;
 	size_t *segmented_seq_lengths = 0;
-	void *averageSequence = 0;
 	T **sequences = 0;
 	int actual_num_series = 0; // excludes failed file reading
 
@@ -69,11 +67,11 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 			exit(CANNOT_READ_SEQUENCE_PREFIX_FILE);
 		}
 		setupPercentageDisplay("Opt-in Step: Chopping sequence prefixes");
-		chopPrefixFromSequences<T>(*seqprefix, *seqprefix_length, &sequences, &actual_num_series, sequence_lengths, series_file_names, output_prefix, norm_sequences);
+		chopPrefixFromSequences<T>(*seqprefix, *seqprefix_length, sequences, &actual_num_series, sequence_lengths, series_file_names, output_prefix, norm_sequences);
 		teardownPercentageDisplay();
-		cudaFreeHost(*seqprefix); CUERR("Freeing CPU memory for the prefix sequence");
-		cudaFreeHost(seqprefix); CUERR("Freeing CPU memory for the prefix sequencers pointer");
-		cudaFreeHost(seqprefix_length); CUERR("Freeing CPU memory for the prefix sequence length");
+		cudaFree(*seqprefix); CUERR("Freeing managed memory for the prefix sequence");
+		cudaFree(seqprefix); CUERR("Freeing managed memory for the prefix sequencers pointer");
+		cudaFree(seqprefix_length); CUERR("Freeing managed memory for the prefix sequence length");
 	}
 	// Step 2. If a minimum segment length was provided, segment the input sequences into unimodal pieces. 
 	if(min_segment_length > 0){
@@ -81,14 +79,14 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 		adaptive_segmentation<T>(sequences, sequence_lengths, actual_num_series, min_segment_length, &segmented_sequences, &segmented_seq_lengths);
 		teardownPercentageDisplay();
 		for (int i = 0; i < actual_num_series; i++){ 
-			cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for a presegmentation sequence");
+			cudaFree(sequences[i]); CUERR("Freeing managed memory for a presegmentation sequence");
 			// Sequences of length 1 are problematic as there is no meaningful warp to be performed, and they are almost certain to become the initial medoid.
 			// We therefore eliminate them.
 			if(segmented_seq_lengths[i] < 2){
 				std::cerr << "Removing segmented sequence '" << series_file_names[i] << "' of length " << segmented_seq_lengths[i]
 					  << " as it may unduly skew the convergence process. To retain this sequence, consider setting a smaller minimum segment size (currently " 
 					  << min_segment_length << ")" << std::endl;
-				cudaFree(segmented_sequences[i]); CUERR("Freeing CPU memory for a discarded post-segmentation sequence");
+				cudaFree(segmented_sequences[i]); CUERR("Freeing managed memory for a discarded post-segmentation sequence");
 				for (int j = i + 1; j < actual_num_series; j++){ 
 					segmented_sequences[j-1] = segmented_sequences[j]; // TODO: use memmove() instead?
 					segmented_seq_lengths[j-1] = segmented_seq_lengths[j];
@@ -97,35 +95,25 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 			}
 		}
 		writeSequences(segmented_sequences, segmented_seq_lengths, series_file_names, actual_num_series, CONCAT2(output_prefix, ".segmented_seqs.txt").c_str());
-		cudaFreeHost(sequences); CUERR("Freeing CPU memory for the presegmentation sequence pointers");
-		cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the presegmentation sequence lengths");
+		cudaFree(sequences); CUERR("Freeing managed memory for the presegmentation sequence pointers");
+		cudaFree(sequence_lengths); CUERR("Freeing managed memory for the presegmentation sequence lengths");
 		sequences = segmented_sequences;
 		sequence_lengths = segmented_seq_lengths;
 	}
 
 	// Step 3. The meat of this meal!
-	performDBA<T>(sequences, actual_num_series, sequence_lengths, series_file_names, use_open_start, use_open_end, output_prefix, (T **) &averageSequence, &averageSequenceLength, norm_sequences);
-
-	// Step 4. Save results.
-	std::ofstream avg_file(CONCAT2(output_prefix, ".avg.txt").c_str());
-	if(!avg_file.is_open()){
-		std::cerr << "Cannot open sequence averages file " << output_prefix << ".avg.txt for writing" << std::endl;
-		exit(CANNOT_WRITE_DBA_AVG);
-	}
-	for (size_t i = 0; i < averageSequenceLength; ++i) { avg_file << ((T *) averageSequence)[i] << std::endl; }
-	avg_file.close();
+	performDBA<T>(sequences, actual_num_series, sequence_lengths, series_file_names, use_open_start, use_open_end, output_prefix, norm_sequences, cdist);
 
 	// Cleanup
 	for (int i = 0; i < actual_num_series; i++){ 
 		cudaFreeHost(series_file_names[i]); CUERR("Freeing CPU memory for a sequence name");
 		if(min_segment_length == 0){ // i.e. we still have the original seqs
-			cudaFreeHost(sequences[i]); CUERR("Freeing CPU memory for an original sequence");
+			cudaFree(sequences[i]); CUERR("Freeing managed memory for an original sequence");
 		}
 	}
 	cudaFreeHost(series_file_names); CUERR("Freeing CPU memory for the sequence names array");
-	cudaFreeHost(sequences); CUERR("Freeing CPU memory for the sequence pointers");
-	cudaFreeHost(sequence_lengths); CUERR("Freeing CPU memory for the sequence lengths");
-	cudaFreeHost(averageSequence); CUERR("Freeing CPU memory for the DBA result");
+	cudaFree(sequences); CUERR("Freeing managed memory for the sequence pointers");
+	cudaFree(sequence_lengths); CUERR("Freeing managed memory for the sequence lengths");
 }
 
 #endif

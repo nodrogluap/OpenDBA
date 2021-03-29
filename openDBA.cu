@@ -23,7 +23,7 @@ int main(int argc, char **argv){
 		}
 	}
 
-	if(argc < 8){
+	if(argc < 9){
 #if HDF5_SUPPORTED == 1
 		std::cout << "Usage: " << argv[0] << " <binary|text|tsv|fast5> ";
 #else
@@ -34,11 +34,11 @@ int main(int argc, char **argv){
 #else
 		std::cout << "<int|uint|ulong|float|double> " <<
 #endif
-		          "<global|open_start|open_end|open> <output files prefix> <minimum unimodal segment length, or 0 for no segmentation> <prefix sequence to remove|/dev/null> <series.tsv|<series1> <series2> [series3...]>\n";
+		          "<global|open_start|open_end|open> <output files prefix> <minimum unimodal segment length, or 0 for no segmentation> <prefix sequence to remove|/dev/null> <clustering threshold> <series.tsv|<series1> <series2> [series3...]>\n";
 		exit(1);
      	}
 
-	int num_series = argc-7;
+	int num_series = argc-8;
 	int min_segment_length = atoi(argv[5]); // reasonable settings for nanopore RNA dwell time distributions would be 4 (lower to 2 for DNA)
 	int read_mode = TEXT_READ_MODE;
 	if(!strcmp(argv[1],"binary")){
@@ -83,25 +83,27 @@ int main(int argc, char **argv){
 		seqprefix_filename = argv[6];
 	}
 
-	int argind = 7; // Where the file names start
+	double cdist = (double) atof(argv[7]);
+
+	int argind = 8; // Where the file names start
 	// The following are all the data types supported by CUDA's atomicAdd() operation, so we support them too for best value precision maintenance.
 	if(!strcmp(argv[2],"int")){
-		setupAndRun<int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences);
+		setupAndRun<int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
 	}
 	else if(!strcmp(argv[2],"uint")){
-		setupAndRun<unsigned int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences);
+		setupAndRun<unsigned int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
 	}
 	else if(!strcmp(argv[2],"ulong")){
-		setupAndRun<unsigned long long>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences);
+		setupAndRun<unsigned long long>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
 	}
 	else if(!strcmp(argv[2],"float")){
-		setupAndRun<float>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences);
+		setupAndRun<float>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
 	}
 	// Only since CUDA 6.1 (Pascal and later architectures) is atomicAdd(double *...) supported.  Remove if you want to compile for earlier graphics cards.
 #if DOUBLE_UNSUPPORTED == 1
 #else
 	else if(!strcmp(argv[2],"double")){
-		setupAndRun<double>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences);
+		setupAndRun<double>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
 	}
 #endif
 	else{

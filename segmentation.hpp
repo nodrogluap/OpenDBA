@@ -378,8 +378,8 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	}
 	T **padded_segmented_sequences;
         cudaMallocHost(&padded_segmented_sequences, sizeof(T *)*num_seqs); CUERR("Allocating CPU memory for the padded segmented sequence pointers");
-        cudaMallocHost(segmented_sequences, sizeof(T *)*num_seqs); CUERR("Allocating CPU memory for the segmented sequence pointers");
-	cudaMallocHost(segmented_seq_lengths, sizeof(size_t)*num_seqs); CUERR("Allocating CPU memory for the segmented sequence lengths");
+        cudaMallocManaged(segmented_sequences, sizeof(T *)*num_seqs); CUERR("Allocating managed memory for the segmented sequence pointers");
+	cudaMallocManaged(segmented_seq_lengths, sizeof(size_t)*num_seqs); CUERR("Allocating managed memory for the segmented sequence lengths");
 	cudaStream_t *dev_stream;
         cudaMallocHost(&dev_stream, sizeof(cudaStream_t)*deviceCount); CUERR("Allocating CPU memory for sequence segmentation streams");
 	for(int currDevice = 0; currDevice < deviceCount; currDevice++){

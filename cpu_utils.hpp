@@ -56,7 +56,7 @@ read_binary_data(const char *binary_file_name, T **output_vals, size_t *num_outp
   }
 
   T *out = 0;
-  cudaMallocHost(&out, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from file");
+  cudaMallocManaged(&out, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from file");
 
   ifs.seekg(0, std::ios::beg);
   ifs.read((char *) out, n);
@@ -90,7 +90,7 @@ read_text_data(const char *text_file_name, T **output_vals, size_t *num_output_v
 		return 1;
 	}
 
-	cudaMallocHost(output_vals, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from text file");
+	cudaMallocManaged(output_vals, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from text file");
   
 	// Read the actual values
 	ifs.clear(); // get rid of EOF error state
@@ -100,7 +100,6 @@ read_text_data(const char *text_file_name, T **output_vals, size_t *num_output_v
 	int i = 0;
 	while(n--){  // Read line by line
 		std::getline(ifs, line); in.str(line);
-		// in >> out[i++];      // Read the first whitespace-separated token
 		in >> (*output_vals)[i++];      // Read the first whitespace-separated token
 		in.clear(); // to reuse the stringatream parser
 	}
@@ -251,7 +250,7 @@ read_fast5_data(const char *fast5_file_name, T **sequences, char **sequence_name
 			continue;
 		}
 		T *t_seq = 0;
-		cudaMallocHost(&t_seq, sizeof(T)*read_length);  CUERR("Cannot allocate CPU memory for FAST5 signal");
+		cudaMallocManaged(&t_seq, sizeof(T)*read_length);  CUERR("Cannot allocate CPU memory for FAST5 signal");
 		// Convert the FAST5 raw shorts to the desired datatype from the template
 		for(int j = 0; j < read_length; j++){
 			t_seq[j] = (T) sequence_buffer[j];
@@ -285,7 +284,7 @@ read_tsv_data(const char *text_file_name, T **sequences, char **sequence_names, 
 		int numDataColumns = std::count(line.begin(), line.end(), '\t');
 		sequence_lengths[local_seq_count_so_far] = numDataColumns;
 		T *this_seq;
-		cudaMallocHost(&this_seq, sizeof(T)*numDataColumns); CUERR("Cannot allocate CPU memory for reading sequence from TSV file");
+		cudaMallocManaged(&this_seq, sizeof(T)*numDataColumns); CUERR("Cannot allocate CPU memory for reading sequence from TSV file");
 		sequences[local_seq_count_so_far] = this_seq;
 
 		std::istringstream iss(line);
@@ -316,9 +315,9 @@ int readSequenceTSVFiles(char **filenames, int num_files, T ***sequences, char *
 	}
 	std::cerr << ", total sequence count " << total_seq_count << std::endl;
         std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
-        cudaMallocHost(sequences, sizeof(T *)*total_seq_count); CUERR("Allocating CPU memory for sequence pointers");
+        cudaMallocManaged(sequences, sizeof(T *)*total_seq_count); CUERR("Allocating CPU memory for sequence pointers");
         cudaMallocHost(sequence_names, sizeof(char *)*total_seq_count); CUERR("Allocating CPU memory for sequence lengths");
-        cudaMallocHost(sequence_lengths, sizeof(size_t)*total_seq_count); CUERR("Allocating CPU memory for sequence lengths");
+        cudaMallocManaged(sequence_lengths, sizeof(size_t)*total_seq_count); CUERR("Allocating CPU memory for sequence lengths");
 
         int dotsPrinted = 0;
         char spinner[4] = { '|', '/', '-', '\\'};
@@ -361,9 +360,9 @@ int readSequenceFAST5Files(char **filenames, int num_files, T ***sequences, char
         }
         std::cerr << ", total sequence count " << total_seq_count << std::endl;
         std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
-	cudaMallocHost(sequences, sizeof(T *)*total_seq_count); CUERR("Allocating CPU memory for sequence pointers");
+	cudaMallocManaged(sequences, sizeof(T *)*total_seq_count); CUERR("Allocating CPU memory for sequence pointers");
         cudaMallocHost(sequence_names, sizeof(char *)*total_seq_count); CUERR("Allocating CPU memory for sequence lengths");
-        cudaMallocHost(sequence_lengths, sizeof(size_t)*total_seq_count); CUERR("Allocating CPU memory for sequence lengths");
+        cudaMallocManaged(sequence_lengths, sizeof(size_t)*total_seq_count); CUERR("Allocating CPU memory for sequence lengths");
 
         int dotsPrinted = 0;
         char spinner[4] = { '|', '/', '-', '\\'};
@@ -395,8 +394,8 @@ int readSequenceFAST5Files(char **filenames, int num_files, T ***sequences, char
 
 template<typename T>
 int readSequenceTextFiles(char **filenames, int num_files, T ***sequences, size_t **sequence_lengths){
-        cudaMallocHost(sequences, sizeof(T *)*num_files); CUERR("Allocating CPU memory for sequence pointers");
-        cudaMallocHost(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating CPU memory for sequence lengths");
+        cudaMallocManaged(sequences, sizeof(T *)*num_files); CUERR("Allocating CPU memory for sequence pointers");
+        cudaMallocManaged(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating CPU memory for sequence lengths");
 
         int dotsPrinted = 0;
 	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? " text data file" : " text data files") << ", total sequence count " << num_files << std::endl;
@@ -428,8 +427,8 @@ int readSequenceTextFiles(char **filenames, int num_files, T ***sequences, size_
 
 template<typename T>
 int readSequenceBinaryFiles(char **filenames, int num_files, T ***sequences, size_t **sequence_lengths){
-        cudaMallocHost(sequences, sizeof(T *)*num_files); CUERR("Allocating CPU memory for sequence pointers");
-        cudaMallocHost(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating CPU memory for sequence lengths");
+        cudaMallocManaged(sequences, sizeof(T *)*num_files); CUERR("Allocating CPU memory for sequence pointers");
+        cudaMallocManaged(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating CPU memory for sequence lengths");
 
         int dotsPrinted = 0;
 	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? " binary data file" : " binary data files") << ", total sequence count " << num_files << std::endl;
