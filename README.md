@@ -9,6 +9,8 @@ Requires CUDA Toolkit 7 or later: https://developer.nvidia.com/cuda-toolkit
 This code has only been tested on Linux.
 
 ```bash
+git clone --recurse-submodules https://github.com/nodrogluap/OpenDBA/
+cd OpenDBA
 make
 make tests
 ```
@@ -25,7 +27,7 @@ First, make sure you have an NVIDIA GPU in your computer.
 If you have up to thousands of text files with one number per line, generate (1) a sequence distance matrix and (2) a consensus sequence using the following command:
 
 ```bash
-openDBA text float global output_prefix 0 /dev/null input_numeric_series*.txt
+openDBA text float global output_prefix 0 /dev/null 1 input_numeric_series*.txt
 ```
 Outputs are in `output_prefix.pair_dists.txt` and `output_prefix.avg.txt`. See all command line options by running the program without any arguments.
 
@@ -108,6 +110,12 @@ This is mitigated in the OpenDBA software by reversing the open end step option 
 The consensus for 3 raw sequences starts to smooth out the signal (less vertical "fat"), allowing us to look at fundamental properties of molecules like dwell time bias, irreducible noise, transition effects, etc. without a reference bias or including only signals that were well interpreted by a neural network basecaller.  On an RTX 2080 Ti GPU, consensus was calculated in 1 minute and 34 seconds, whereas the Java DBA implementation took 47 minutes. Due to the inherent parallelism of OpenDBA, consensus of sets of hundreds of sequences take only marginally longer than for 3 sequences.
 
 ![Centroid consensus for the three raw nanopore virus direct RNA sequences used in the previous graphs](docs/rhinoA_3seq_raw_signal_dba.png)
+
+## Sequence Clustering
+
+OpenDBA now has initial support for clustering, which is useful when the input signals represent different underlying sets of information and therefore global averaging would not make sense. The coarseness of the clustering is controlled by the last parameter before the input files are listed on the command line. This parameter is a cutoff threshold in a normalized distance tree (after complete linkage clustering), therefore setting the threshold to 1 (the normalized tree height) makes all sequences part of one cluster for averaging, whereas 0 would only merge sequences that were exactly the same. A value of 0.71 in the following cluster tree would cause the formation of 7 clusters (including singletons Read_317 and Read_307):
+
+![Dendrogram of 38 sequences](docs/clustering_0.71.png)
 
 ## Common Problems &amp; Solutions
 
