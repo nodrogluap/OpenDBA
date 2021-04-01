@@ -539,7 +539,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	cudaFree(gpu_sequences); CUERR("Freeing CPU memory for GPU sequence data");
 
 	int num_clusters = 1;
-	if(1 || cdist < 1){ // in cluster mode
+	if(cdist != 1){ // in cluster mode
 		std::ofstream membership_file(CONCAT2(output_prefix, ".cluster_membership.txt").c_str());
         	if(!membership_file.is_open()){
                 	std::cerr << "Cannot open sequence cluster membership file " << output_prefix << ".cluster_membership.txt for writing" << std::endl;
