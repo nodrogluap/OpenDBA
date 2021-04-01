@@ -173,10 +173,18 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 	// TODO: implement permutation test to find best cluster threshold
 	// as per https://repositori.upf.edu/handle/10230/19856
 	if(*cdist < 0){
+		std::cerr << "TODO: permutation testing" << std::endl;
 	}
 
-	// Stop clustering at step with cluster distance >= cdist
-	cutree_cdist(num_sequences, merge, height, *cdist, memberships);
+	if(*cdist > 1){ // assume you want to do k-means clustering
+		std::cerr << "Using K-means clustering" << std::endl;
+		cutree_k(num_sequences, merge, (int) *cdist, memberships);
+	}
+	else{
+		// Stop clustering at step with cluster distance >= cdist
+		std::cerr << "Using dendrogram fixed height clustering cutoff" << std::endl;
+		cutree_cdist(num_sequences, merge, height, *cdist, memberships);
+	}
 	delete[] merge;
 	delete[] height;
 
@@ -531,7 +539,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	cudaFree(gpu_sequences); CUERR("Freeing CPU memory for GPU sequence data");
 
 	int num_clusters = 1;
-	if(cdist < 1){ // in cluster mode
+	if(1 || cdist < 1){ // in cluster mode
 		std::ofstream membership_file(CONCAT2(output_prefix, ".cluster_membership.txt").c_str());
         	if(!membership_file.is_open()){
                 	std::cerr << "Cannot open sequence cluster membership file " << output_prefix << ".cluster_membership.txt for writing" << std::endl;
