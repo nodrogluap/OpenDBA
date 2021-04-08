@@ -123,6 +123,8 @@ When the value is greater than 1, the integer value is taken and used to perform
 openDBA fast5 float open_end output_prefix 4 direct_rna_leader_float.txt 13 ont_folder_name/*.fast5
 ```
 
+Note that the K-means clustering ignores singleton branches in the dendrogram, so reduce the odds of overclustering due to errant data you did not expect. This entails that the actual number "K" in K-means may be greater than the K specified on the command line, to accomodate these singletons.  The actual K used is printed in the standard error output to note the final value of K used.
+
 ## Common Problems &amp; Solutions
 
 If the code does not compile, you may have encountered a bug in CentOS 7's glibc implementation. The solution can be found [here](https://github.com/nodrogluap/OpenDBA/issues/9).
