@@ -113,9 +113,15 @@ The consensus for 3 raw sequences starts to smooth out the signal (less vertical
 
 ## Sequence Clustering
 
-OpenDBA now has initial support for clustering, which is useful when the input signals represent different underlying sets of information and therefore global averaging would not make sense. The coarseness of the clustering is controlled by the last parameter before the input files are listed on the command line. This parameter is a cutoff threshold in a normalized distance tree (after complete linkage clustering), therefore setting the threshold to 1 (the normalized tree height) makes all sequences part of one cluster for averaging, whereas 0 would only merge sequences that were exactly the same. A value of 0.71 in the following cluster tree would cause the formation of 7 clusters (including singletons Read_317 and Read_307):
+OpenDBA now has initial support for clustering, which is useful when the input signals represent different underlying sets of information and therefore global averaging would not make sense. The coarseness of the clustering is controlled by the last parameter before the input files are listed on the command line. When in the range \[0,1) this parameter is a cutoff threshold in a normalized distance tree (after complete linkage clustering), therefore setting the threshold to 1 (the normalized tree height) makes all sequences part of one cluster for averaging, whereas 0 would only merge sequences that were exactly the same. A value of 0.71 in the following cluster tree would cause the formation of 7 clusters (including singletons Read_317 and Read_307):
 
 ![Dendrogram of 38 sequences](docs/clustering_0.71.png)
+
+When the value is greater than 1, the integer value is taken and used to perform [K-means clustering](https://en.wikipedia.org/wiki/K-means_clustering), e.g. to generate 13 clusters because you think you have 13 different direct RNA transcripts:
+
+```bash
+openDBA fast5 float open_end output_prefix 4 direct_rna_leader_float.txt 13 ont_folder_name/*.fast5
+```
 
 ## Common Problems &amp; Solutions
 
