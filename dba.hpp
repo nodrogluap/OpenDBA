@@ -170,20 +170,48 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 	hclust_fast(num_sequences, cpu_double_dtwPairwiseDistances, HCLUST_METHOD_COMPLETE, merge, height);
 	free(cpu_double_dtwPairwiseDistances);
 
-	// TODO: implement permutation test to find best cluster threshold
-	// as per https://repositori.upf.edu/handle/10230/19856
+	// Three possible strategies for clustering
 	if(*cdist < 0){
 		std::cerr << "TODO: permutation testing" << std::endl;
 	}
 
 	if(*cdist > 1){ // assume you want to do k-means clustering
-		std::cerr << "Using K-means clustering" << std::endl;
-		cutree_k(num_sequences, merge, (int) *cdist, memberships);
+		int new_k = *cdist;
+		if(new_k > num_sequences){
+			// Everything is in its own cluster
+			new_k = num_sequences;
+		}
+		std::cerr << std::endl << "Using K-means clustering (excluding singletons)" << std::endl;
+		// Exclude any singletons as being considered "clusters"
+		int num_multimember_clusters;
+		do{
+			cutree_k(num_sequences, merge, new_k, memberships);
+			int* num_members_per_cluster = new int[new_k](); // zero-initialized
+			for(int i = 0; i < num_sequences; i++){
+				num_members_per_cluster[memberships[i]]++;
+			}
+			num_multimember_clusters = 0;
+			for(int i = 0; i < new_k; i++){
+				if(num_members_per_cluster[i] > 1){
+					num_multimember_clusters++;
+				}
+                        }
+			//std::cerr << "Found " << num_multimember_clusters << " multicluster members with K set to " << new_k << std::endl;
+			delete[] num_members_per_cluster; // overkill maybe?
+			new_k += ((int) *cdist) - num_multimember_clusters; // adjust K to compensate for singletons eating up real cluster space
+		} while(num_multimember_clusters < ((int) *cdist) && new_k < num_sequences);
+		std::cerr << "Final K to compensate for singletons: " << new_k << std::endl;
+		
 	}
-	else{
+	else if(*cdist >= 0){
 		// Stop clustering at step with cluster distance >= cdist
-		std::cerr << "Using dendrogram fixed height clustering cutoff" << std::endl;
+		std::cerr << std::endl << "Using dendrogram fixed height clustering cutoff" << std::endl;
 		cutree_cdist(num_sequences, merge, height, *cdist, memberships);
+	}
+	else{ 	
+		// Negative number means we want to use bootstrap supported cluster building
+		std::cerr << std::endl << "Using bootstrap support to build clusters" << std::endl;
+		// TODO
 	}
 	delete[] merge;
 	delete[] height;
@@ -194,19 +222,22 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 			num_clusters = memberships[i]+1;
 		}
 	}
+	std::cerr << "There are " << num_clusters << "clusters" << std::endl;
 	int *medoidIndices = new int[num_clusters];
 
 	T *clusterDtwSoS = num_clusters == 1 ? dtwSoS : new T[num_sequences]; // will use some portion of this max for each cluster
 	for(int currCluster = 0; currCluster < num_clusters; currCluster++){
+		std::cerr << "Processing cluster " << currCluster;
 		int num_cluster_members = 0;
-		for(size_t i = 0; i < num_sequences-1; ++i){
+		for(size_t i = 0; i < num_sequences; ++i){
 			if(memberships[i] == currCluster){
 				num_cluster_members++;
 			}
 		}
 		int *clusterIndices = new int[num_cluster_members];
+		std::cerr << " membership=" << num_cluster_members << ", " << std::endl;
 		int cluster_cursor = 0;
-		for(size_t i = 0; i < num_sequences-1; ++i){
+		for(size_t i = 0; i < num_sequences; ++i){
 			if(memberships[i] == currCluster){
 				clusterIndices[cluster_cursor++] = i;
 			}
@@ -239,6 +270,7 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 			medoidIndex = clusterIndices[0];
 		}
 		medoidIndices[currCluster] = medoidIndex;
+		std::cerr << " medoid is " << medoidIndex << std::endl;
 		delete[] clusterIndices;
 	}
 	if(num_clusters != 1){
@@ -252,6 +284,7 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 	}
 	cudaFreeHost(gpu_dtwPairwiseDistances); CUERR("Freeing CPU memory for GPU DTW pairwise distances' pointers");
 	mats.close();
+	std::cerr << "Returning medoid indices" << std::endl;
 	return medoidIndices;
 }
 
@@ -364,8 +397,8 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, size_t num_sequences, size_t
 
 		T *dtwCostSoFar = 0;
 		T *newDtwCostSoFar = 0;
-                cudaMallocManaged(&dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values");
-                cudaMallocManaged(&newDtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for new DTW pairwise distance intermediate values");
+                cudaMallocManaged(&dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values in DBA update");
+                cudaMallocManaged(&newDtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for new DTW pairwise distance intermediate values in DBA update");
 
 		// Under the assumption that long sequences have the same or more information than the centroid, flip the DTW comparison so the centroid has an open end.
 		// Otherwise you're cramming extra sequence data into the wrong spot and the DTW will give up and choose an all-up then all-open right path instead of a diagonal,
@@ -382,7 +415,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, size_t num_sequences, size_t
 
                 // Make calls to DTWDistance serial within each seq, but allow multiple seqs on the GPU at once.
                 cudaStream_t seq_stream;
-                cudaStreamCreateWithPriority(&seq_stream, cudaStreamNonBlocking, descendingPriority);
+                cudaStreamCreateWithPriority(&seq_stream, cudaStreamNonBlocking, descendingPriority); CUERR("Creating prioritized CUDA stream");
                 if(descendingPriority < priority_low){
                         descendingPriority++;
                 }
@@ -413,7 +446,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, size_t num_sequences, size_t
                                                  num_sequences, (size_t *) PARAM_NOT_USED, dtwCostSoFar, newDtwCostSoFar, pathMatrix, pathPitch, (T *) PARAM_NOT_USED, use_open_start, use_open_end); CUERR("Sequence DTW vertical swath calculation with path storage");
 				cudaMemcpyAsync(dtwCostSoFar, newDtwCostSoFar, dtwCostSoFarSize, cudaMemcpyDeviceToDevice, seq_stream); CUERR("Copying DTW pairwise distance intermediate values without flipped sequence order");
 			}
-			cudaStreamSynchronize(seq_stream);
+			cudaStreamSynchronize(seq_stream);  CUERR("Synchronizing prioritized CUDA stream mid-path");
 #if DEBUG == 1
 			for(int i = 0; i < dtw_limit; i++){
 				cost << dtwCostSoFar[i] << ", ";
@@ -424,14 +457,15 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, size_t num_sequences, size_t
 #if DEBUG == 1
 		cost.close();
 #endif
-		/* Start of debugging code, which saves the DTW path for each sequence vs. consensus. Requires C++11 compatibility. */
-		cudaStreamSynchronize(seq_stream);
 
 		updateCentroid<<<1,1,0,seq_stream>>>(sequences[seq_index], gpu_centroidAlignmentSums, nElementsForMean, pathMatrix, centerLength, current_seq_length, pathPitch, flip_seq_order);
                 // Will cause memory to be freed in callback after seq DTW completion, so the sleep_for() polling above can
                 // eventually release to launch more kernels as free memory increases (if it's not already limited by the kernel grid block queue).
-		addStreamCleanupCallback(dtwCostSoFar, newDtwCostSoFar, pathMatrix, seq_stream);
-		
+		cudaStreamSynchronize(seq_stream); CUERR("Synchronizing prioritized CUDA stream in DBA update before cleanup");
+                cudaFree(dtwCostSoFar); CUERR("Freeing DTW intermediate cost values in DBA cleanup");
+                cudaFree(newDtwCostSoFar); CUERR("Freeing new DTW intermediate cost values in DBA cleanup");
+        	cudaStreamDestroy(seq_stream); CUERR("Removing a CUDA stream after completion of DBA cleanup");
+
 		int num_columns = centerLength;
 		int num_rows = current_seq_length;
 		if(flip_seq_order){int tmp = num_rows; num_rows = num_columns; num_columns = tmp;}
@@ -440,15 +474,17 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, size_t num_sequences, size_t
 		
 	        cudaMallocHost(&cpu_stepMatrix, sizeof(unsigned char)*pathPitch*num_rows); CUERR("Allocating CPU memory for step matrix");
         	cudaMemcpy(cpu_stepMatrix, pathMatrix, sizeof(unsigned char)*pathPitch*num_rows, cudaMemcpyDeviceToHost);  CUERR("Copying GPU to CPU memory for step matrix");
+                cudaFree(pathMatrix); CUERR("Freeing DTW path matrix in DBA cleanup");
 
 #if DEBUG == 1
+		/* Start of debugging code, which saves the DTW path for each sequence vs. consensus. Requires C++11 compatibility. */
 		std::string step_filename = output_prefix+std::string("stepmatrix")+std::to_string(seq_index);
 		writeDTWPathMatrix<T>(cpu_stepMatrix, step_filename.c_str(), num_columns, num_rows, pathPitch);
 #endif
 		
 		std::string path_filename = output_prefix+std::string(".path")+std::to_string(seq_index)+".txt";
 		writeDTWPath(cpu_stepMatrix, path_filename.c_str(), sequences[seq_index], current_seq_length, cpu_centroid, centerLength, num_columns, num_rows, pathPitch, flip_seq_order);
-		cudaFreeHost(cpu_stepMatrix);
+		cudaFreeHost(cpu_stepMatrix); CUERR("Freeing host memory for step matrix");
 		/* end of debugging code */
 
         }
