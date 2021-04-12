@@ -222,10 +222,10 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 			num_clusters = memberships[i]+1;
 		}
 	}
-	std::cerr << "There are " << num_clusters << "clusters" << std::endl;
+	std::cerr << "There are " << num_clusters << " clusters" << std::endl;
 	int *medoidIndices = new int[num_clusters];
 
-	T *clusterDtwSoS = num_clusters == 1 ? dtwSoS : new T[num_sequences]; // will use some portion of this max for each cluster
+	T *clusterDtwSoS = num_clusters == 1 ? dtwSoS : new T[num_sequences](); // will use some portion of this max for each cluster
 	for(int currCluster = 0; currCluster < num_clusters; currCluster++){
 		std::cerr << "Processing cluster " << currCluster;
 		int num_cluster_members = 0;
@@ -268,6 +268,11 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 		}
 		else{	// Single member cluster
 			medoidIndex = clusterIndices[0];
+		}
+		// Sanity check
+		if(medoidIndex == -1){
+			std::cerr << "Logic error in medoid finding routine, please e-mail the developer (gordonp@ucalgary.ca)." << std::endl;
+			exit(MEDOID_FINDING_ERROR);
 		}
 		medoidIndices[currCluster] = medoidIndex;
 		std::cerr << " medoid is " << medoidIndex << std::endl;
@@ -530,6 +535,13 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, size_t num_sequences, size_t
  */
 template <typename T>
 __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, int use_open_start, int use_open_end, char *output_prefix, int norm_sequences, double cdist, cudaStream_t stream=0) {
+
+	// Sanitize the data from potential upstream artifacts or overflow situations
+	for(int i = 0; i < num_sequences; i++){
+		if(sequences[i][sequence_lengths[i]-1] >= sqrt(std::numeric_limits<T>::max())){
+			sequence_lengths[i]--; // truncate the sequence to get rid of the problematic value
+		}
+	}
 
 	// Sort the sequences by length for memory efficiency in computation later on.
 	size_t *sequence_lengths_copy;

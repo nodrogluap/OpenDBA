@@ -490,7 +490,7 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 	// If the adaptive segmentation actually found that there was less than K segments in the subtask, the remaining unused results slots will have a sentinel
 	// value, numeric_limits<T>::max(), that we must eliminate before passing the answer back to the caller.
 	for(int i = 0; i < num_seqs; ++i){
-		T epsilon = std::numeric_limits<T>::max(); // N.B.: it's crirical to use the std:: qualifier otherwise you're accessing device side limits from the imported cudahack
+		T epsilon = std::numeric_limits<T>::max(); // N.B.: it's critical to use the std:: qualifier otherwise you're accessing device side limits from the imported cudahack
 		T *segmented_sequence = padded_segmented_sequences[i];
 		T previous_value = segmented_sequence[0];
 		size_t segmented_seq_length = (*segmented_seq_lengths)[i]; // this is the preallocated max possible length of results, in reality it has a lot of undefined values probably
@@ -554,6 +554,10 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 
 		}
 		// Set the reported segments total for the seq to reflect the adaptive segmentation results.
+		// In rare instances with a tiny amount of final block index data, you end up sqrt(max) a  
+		if(segmented_sequence[cursor-1] >= std::numeric_limits<T>::max()/2){
+			cursor--;
+		}
 		(*segmented_seq_lengths)[i] = cursor;
 
 		// Now that we know the real length, allocate the final memory for the sequence (so later we can free up the big block we wrote to in bulk)
