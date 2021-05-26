@@ -82,10 +82,10 @@ openDBA fast5 float open_end output_prefix 0 /dev/null 1 ont_folder_name/*.fast5
 OpenDBA has a built-in CUDA accelerated unimodal segmentation algorithm. To segment direct RNA signal data from ONT into dwell "events" type:
 
 ```bash
-openDBA fast5 float open_end output_prefix 4 /dev/null 1 ont_folder_name/*.fast5
+openDBA fast5 float open_end output_prefix 6 /dev/null 1 ont_folder_name/*.fast5
 ```
 
-Where 4 is a hint to the segmenter as to how big spurious events caused by sensor noise can be (3 in this case).  The repository also includes a consensus leader sequencing adapter signal for ONT RNA experiments, so this can be chopped off the start of the inputs by replacing the /dev/null argument on the command line:
+Where 6 is a hint to the segmenter as to how big spurious events caused by sensor noise can be (5 in this case).  The repository also includes a consensus leader sequencing adapter signal for ONT RNA experiments, so this can be chopped off the start of the inputs by replacing the /dev/null argument on the command line:
 
 ```bash
 openDBA fast5 float open_end output_prefix 4 direct_rna_leader_float.txt 1 ont_folder_name/*.fast5
