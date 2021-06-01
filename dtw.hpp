@@ -109,12 +109,18 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 			// Make sure bottom row's DTW cost so far is set to the max possible. 
 			// This is how we indicate that we've decided to abrogated the rest of the search.
 			if(threadIdx.x == 0){
-				dtwCostSoFar[0] = numeric_limits<T>::max();
+				newDtwCostSoFar[0] = numeric_limits<T>::max();
 			}
 			// As we've made a final determination for the cost, record it to GPU memory
         		if(dtwPairwiseDistances != 0 && threadIdx.x == 0){
+				// If the alignment has open right end, the medoid calculations will always be biased towards the shortest sequences since the open state is "free",
+				// which is troublesome for retaining consensus features in clusters.  To remove this bias, we will normalize the distance matrix to be relative to the length of the
+                        	// shorter sequence with the assumption on average that the shorter sequence is the one generating "free" 
+				// alignment ends that longer sequences can't compete with.
+                        	T normalized_pair_distance = (T) (sqrtf(newDtwCostSoFar[first_seq_length-1])/first_seq_length);
+
                         	// 1D index for row into distances upper left pairs triangle is the total size of the triangle, minus all those that haven't been processed yet.
-                        	dtwPairwiseDistances[ARITH_SERIES_SUM(num_sequences-1)-ARITH_SERIES_SUM(num_sequences-first_seq_index-1)+blockIdx.x] = (T) sqrtf(newDtwCostSoFar[first_seq_length-1]);
+                        	dtwPairwiseDistances[ARITH_SERIES_SUM(num_sequences-1)-ARITH_SERIES_SUM(num_sequences-first_seq_index-1)+blockIdx.x] = normalized_pair_distance;
         		}
 			return;
 	  	}
@@ -233,7 +239,17 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 	if(offset_within_second_seq+blockDim.x >= second_seq_length){
 		if(dtwPairwiseDistances != 0 && threadIdx.x == 0){
 			// 1D index for row into distances upper left pairs triangle is the total size of the triangle, minus all those that haven't been processed yet. 
-			dtwPairwiseDistances[ARITH_SERIES_SUM(num_sequences-1)-ARITH_SERIES_SUM(num_sequences-first_seq_index-1)+blockIdx.x] = (T) sqrtf(newDtwCostSoFar[first_seq_length-1]);
+			int result_index = ARITH_SERIES_SUM(num_sequences-1)-ARITH_SERIES_SUM(num_sequences-first_seq_index-1)+blockIdx.x;
+
+			// If the alignment has one open end, the medoid calculations will always be biased towards the shortest sequences since the open state is "free",
+			// which is troublesome for retaining consensus features in clusters.  To remove this bias, we will normalize the distance matrix to be relative to the length of the 
+			// shorter sequence with the assumption on average that the shorter sequence is the one generating "free" alignment ends that longer sequences can't compete with.
+			if(use_open_end && !use_open_start || !use_open_end && use_open_start){
+				dtwPairwiseDistances[result_index] = (T) (sqrtf(newDtwCostSoFar[first_seq_length-1])/first_seq_length);
+			}
+			else{ // use the distance as-is (similar length seqwuences will tend tocluster together)
+				dtwPairwiseDistances[result_index] = (T) sqrtf(newDtwCostSoFar[first_seq_length-1]);
+			}
 		}
 	}
 	
