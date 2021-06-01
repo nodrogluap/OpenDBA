@@ -32,7 +32,7 @@ multithreading.o: multithreading.cpp
 submodules/hclust-cpp/fastcluster.o: submodules/hclust-cpp/fastcluster.cpp submodules/hclust-cpp/fastcluster.h
 	nvcc --compiler-options -lstdc++ -c submodules/hclust-cpp/fastcluster.cpp -o $@ 
 
-openDBA.o: openDBA.cu openDBA.cuh segmentation.hpp cpu_utils.hpp gpu_utils.hpp io_utils.hpp exit_codes.hpp dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
+openDBA.o: openDBA.cu openDBA.cuh clustering.cuh segmentation.hpp cpu_utils.hpp gpu_utils.hpp io_utils.hpp exit_codes.hpp dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
 	nvcc -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
 
 plugins: vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so
