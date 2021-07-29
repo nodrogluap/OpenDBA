@@ -197,6 +197,13 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 		std::cerr << "Final K to compensate for singletons: " << new_k << std::endl;
 		
 	}
+        else if(*cdist == 1){
+		// Special case for 1, always everything in one cluster. Avoids cutree_cdist split of two-leaf-only dendrograms
+		// and other simple topologies with branch length 1.
+		for(int i = 0; i < num_sequences; i++){
+			memberships[i] = 0;
+		}
+	}
 	else if(*cdist >= 0){
 		// Stop clustering at step with cluster distance >= cdist
 		std::cerr << std::endl << "Using dendrogram fixed height clustering cutoff" << std::endl;

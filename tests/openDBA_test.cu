@@ -76,7 +76,7 @@ TEST_CASE( " Setup and Run " ){
 		strcpy(output_prefix, s_output_prefix_gdti.c_str());
 		
 		// The following are all the data types supported by CUDA's atomicAdd() operation, so we support them too for best value precision maintenance.
-		setupAndRun<float>(seqprefix_filename, newCharArraysDeepCopy(series_filenames, num_series), num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences);
+		setupAndRun<float>(seqprefix_filename, newCharArraysDeepCopy(series_filenames, num_series), num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, 1.0);
 		
 		std::string s_avg_txt_file = s_output_prefix_gdti + ".avg.txt";
 		char *avg_txt_file = (char*)malloc(s_avg_txt_file.length() + 1);
@@ -119,7 +119,7 @@ TEST_CASE( " Setup and Run " ){
 		strcpy(output_prefix, s_output_prefix_gdti.c_str());
 		
 		// The following are all the data types supported by CUDA's atomicAdd() operation, so we support them too for best value precision maintenance.
-		setupAndRun<float>(seqprefix_filename, newCharArraysDeepCopy(series_filenames, num_series), num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences);
+		setupAndRun<float>(seqprefix_filename, newCharArraysDeepCopy(series_filenames, num_series), num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, 1.0);
 		
 		std::string s_avg_txt_file = s_output_prefix_gdti + ".avg.txt";
 		char *avg_txt_file = (char*)malloc(s_avg_txt_file.length() + 1);
@@ -163,7 +163,7 @@ TEST_CASE( " Setup and Run " ){
 		strcpy(output_prefix, s_output_prefix_gdti.c_str());
 		
 		// The following are all the data types supported by CUDA's atomicAdd() operation, so we support them too for best value precision maintenance.
-		setupAndRun<float>(seqprefix_filename, newCharArraysDeepCopy(series_filenames, num_series), num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences);
+		setupAndRun<float>(seqprefix_filename, newCharArraysDeepCopy(series_filenames, num_series), num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, 1.0);
 		
 		std::string s_avg_txt_file = s_output_prefix_gdti + ".avg.txt";
 		char *avg_txt_file = (char*)malloc(s_avg_txt_file.length() + 1);
@@ -212,7 +212,7 @@ TEST_CASE( " Setup and Run " ){
 		strcpy(output_prefix, s_output_prefix_gdti.c_str());
 		
 		// The following are all the data types supported by CUDA's atomicAdd() operation, so we support them too for best value precision maintenance.
-		setupAndRun<float>(seqprefix_filename, newCharArraysDeepCopy(series_filenames, num_series), num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences);
+		setupAndRun<float>(seqprefix_filename, newCharArraysDeepCopy(series_filenames, num_series), num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, 1.0);
 		
 		std::string s_avg_txt_file = s_output_prefix_gdti + ".avg.txt";
 		char *avg_txt_file = (char*)malloc(s_avg_txt_file.length() + 1);
@@ -265,7 +265,7 @@ TEST_CASE( " Setup and Run " ){
 		strcpy(output_prefix, s_output_prefix_gdti.c_str());
 		
 		// The following are all the data types supported by CUDA's atomicAdd() operation, so we support them too for best value precision maintenance.
-		setupAndRun<float>(seqprefix_filename, newCharArraysDeepCopy(series_filenames, num_series), num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences);
+		setupAndRun<float>(seqprefix_filename, newCharArraysDeepCopy(series_filenames, num_series), num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, 1.0);
 		
 		std::string s_avg_txt_file = s_output_prefix_gdti + ".avg.txt";
 		char *avg_txt_file = (char*)malloc(s_avg_txt_file.length() + 1);
