@@ -84,8 +84,8 @@ TEST_CASE( " Setup and Run " ){
 		
 		float *avg_return_values;
 		size_t num_avg_return_values;
-		
-		read_text_data<float>(avg_txt_file, &avg_return_values, &num_avg_return_values);
+		char *avg_return_names;
+		read_tsv_data<float>(avg_txt_file, &avg_return_values, &avg_return_names, &num_avg_return_values);
 		
 		REQUIRE( num_avg_return_values == 10 );
 		REQUIRE( avg_return_values[0] == 1 );
@@ -127,8 +127,8 @@ TEST_CASE( " Setup and Run " ){
 		
 		float *avg_return_values;
 		size_t num_avg_return_values;
-		
-		read_text_data<float>(avg_txt_file, &avg_return_values, &num_avg_return_values);
+		char *avg_return_names;
+		read_tsv_data<float>(avg_txt_file, &avg_return_values, &avg_return_names, &num_avg_return_values);
 		
 		REQUIRE( num_avg_return_values == 10 );
 		REQUIRE( avg_return_values[0] == 1 );
@@ -171,8 +171,8 @@ TEST_CASE( " Setup and Run " ){
 		
 		float *avg_return_values;
 		size_t num_avg_return_values;
-		
-		read_text_data<float>(avg_txt_file, &avg_return_values, &num_avg_return_values);
+		char *avg_return_names;
+		read_tsv_data<float>(avg_txt_file, &avg_return_values, &avg_return_names, &num_avg_return_values);
 		
 		REQUIRE( num_avg_return_values == 10 );
 		REQUIRE( round_to_three(avg_return_values[0]) == 0.972f );
@@ -220,8 +220,8 @@ TEST_CASE( " Setup and Run " ){
 		
 		float *avg_return_values;
 		size_t num_avg_return_values;
-		
-		read_text_data<float>(avg_txt_file, &avg_return_values, &num_avg_return_values);
+		char *avg_return_names;
+		read_tsv_data<float>(avg_txt_file, &avg_return_values, &avg_return_names, &num_avg_return_values);
 		
 		REQUIRE( num_avg_return_values == 10 );
 		REQUIRE( avg_return_values[0] == 1 );
@@ -273,8 +273,8 @@ TEST_CASE( " Setup and Run " ){
 		
 		float *avg_return_values;
 		size_t num_avg_return_values;
-		
-		read_text_data<float>(avg_txt_file, &avg_return_values, &num_avg_return_values);
+		char *avg_return_names;
+		read_tsv_data<float>(avg_txt_file, &avg_return_values, &avg_return_names, &num_avg_return_values);
 		
 		REQUIRE( num_avg_return_values == 2048 );
 		REQUIRE( avg_return_values[0] == 1 );
