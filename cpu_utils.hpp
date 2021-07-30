@@ -130,8 +130,8 @@ scan_fast5_data(const char *fast5_file_name, size_t *num_sequences){
 
 	if(read_group < 0 || H5Gget_num_objs(read_group, &num_read_objects)){
 		std::cerr << "Could not get read groups from FAST5 (HDF5) file " << fast5_file_name << " so skipping" << std::endl;
-		H5Fclose(file_id);
 		H5Gclose(read_group);
+		H5Fclose(file_id);
 		return FAST5_FILE_CONTENTS_UNRECOGNIZED;
 	}
 	hsize_t num_read_objects_rejected = 0;
@@ -150,6 +150,8 @@ scan_fast5_data(const char *fast5_file_name, size_t *num_sequences){
 			continue;
 		}
 	}
+	H5Gclose(read_group);
+	H5Fclose(file_id);
 	*num_sequences = (size_t) (num_read_objects - num_read_objects_rejected);
 	return 0;
 }
@@ -194,8 +196,8 @@ read_fast5_data(const char *fast5_file_name, T **sequences, char **sequence_name
         }
 	hsize_t num_read_objects = 0;
         if(read_group < 0 || H5Gget_num_objs(read_group, &num_read_objects)){
-                H5Fclose(file_id);
                 H5Gclose(read_group);
+                H5Fclose(file_id);
                 return 0;
         }
        	char *read_subgroup_name = NULL;
@@ -265,6 +267,9 @@ read_fast5_data(const char *fast5_file_name, T **sequences, char **sequence_name
 		local_seq_count_so_far++;
 	}
 	if(read_subgroup_name != NULL) free(read_subgroup_name);
+	H5Gclose(read_group);
+	H5Fclose(file_id);
+
 	return local_seq_count_so_far;
 }
 #endif
