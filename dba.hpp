@@ -645,8 +645,12 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
         	cudaMemcpyAsync(gpu_barycenter, sequences[medoidIndices[currCluster]], medoidLength*sizeof(T), cudaMemcpyDeviceToDevice, stream);  CUERR("Copying medoid seed to GPU memory");
 
         	// Refine the alignment iteratively.
-		T *new_barycenter = 0;
+		T *new_barycenter = 0, *previous_barycenter, *two_previous_barycenter;
 		cudaMallocHost(&new_barycenter, sizeof(T)*medoidLength); CUERR("Allocating CPU memory for DBA update result");
+		if(use_open_start || use_open_end){
+			cudaMallocHost(&previous_barycenter, sizeof(T)*medoidLength); CUERR("Allocating CPU memory for previous DBA update result");
+			cudaMallocHost(&two_previous_barycenter, sizeof(T)*medoidLength); CUERR("Allocating CPU memory for two-back DBA update result");
+		}
 
 		std::cerr << "Processing cluster " << (currCluster+1) << " of " << num_clusters << ", " << 
 			  num_members << " members, initial medoid " << sequence_names[medoidIndices[currCluster]] << " has length " << medoidLength << std::endl;
@@ -681,6 +685,19 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 			if(delta == 0){
 				break;
 			}
+			// In open end mode (unlike global), it's possible for the centroid to flip between two nearly identical
+			// centroids in perpetuity, so never really "converging". Handle this case with a shortcircuit.
+			if(use_open_start || use_open_end){
+				if(i >= 1 && !memcmp(new_barycenter, two_previous_barycenter, sizeof(T)*medoidLength)){
+					break;
+				}
+				if(i > 1){
+					cudaMemcpy(two_previous_barycenter, previous_barycenter, medoidLength*sizeof(T), cudaMemcpyHostToHost); CUERR("Replacing two-back updated DBA medoid on host");
+				}
+				if(i > 0){
+					cudaMemcpy(previous_barycenter, new_barycenter, medoidLength*sizeof(T), cudaMemcpyHostToHost); CUERR("Replacing previously updated DBA medoid on host");
+				}
+			}
 			cudaMemcpy(gpu_barycenter, new_barycenter, sizeof(T)*medoidLength, cudaMemcpyHostToDevice);  CUERR("Copying updated DBA medoid to GPU");
 		}
 		// Clean up the GPU memory we don't need any more.
@@ -712,6 +729,10 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		}
 		avgs_file << std::endl;
 		cudaFreeHost(new_barycenter); CUERR("Allocating CPU memory for DBA update result");
+		if(use_open_start || use_open_end){
+			cudaFreeHost(previous_barycenter); CUERR("Allocating CPU memory for previous DBA update result");
+			cudaFreeHost(two_previous_barycenter); CUERR("Allocating CPU memory for two back DBA update result");
+		}
 	}
         avgs_file.close();
 
