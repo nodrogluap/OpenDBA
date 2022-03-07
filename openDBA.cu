@@ -9,13 +9,13 @@
 __host__
 int main(int argc, char **argv){
 	
-	int norm_sequences = 0;
+	int norm_sequences = 1;
 	
 	char c;
 	while( ( c = getopt (argc, argv, "n") ) != -1 ) {
 		switch(c) {
 			case 'n':
-				norm_sequences = 1;
+				norm_sequences = 0;
 				break;
 			default:
 				/* You won't actually get here. */
