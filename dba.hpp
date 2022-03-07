@@ -97,6 +97,7 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 		// eventually release to launch more kernels as free memory increases (if it's not already limited by the kernel grid block queue).
 		addStreamCleanupCallback(dtwCostSoFar, newDtwCostSoFar, 0, seq_stream);
 	}
+	std::cerr << std::endl;
         cudaFreeHost(maxThreads); CUERR("Freeing CPU memory for device thread properties");
 	// TODO: use a fancy cleanup thread barrier here so that multiple DBAs could be running on the same device and not interfere with each other at this step.
 	for(int i = 0; i < deviceCount; i++){
@@ -142,6 +143,9 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 		index_offset += num_sequences - seq_index - 1;
 		mats << std::endl;
 	}
+	
+	// If sequences are the same then max_distance would be 0. We set it to 1 because any number divided by 1 will still be itself. Saves us from dividing by 0 later.
+	if(max_distance == 0) max_distance = 1;
 	// Last line is pro forma as all pair distances have already been printed
 	mats << sequence_names[num_sequences-1];
 	for(size_t pad = 0; pad < num_sequences; ++pad){
@@ -352,7 +356,7 @@ void updateCentroid(T *seq, T *centroidElementSums, unsigned int *nElementsForMe
  */
 template<typename T>
 __host__ double 
-DBAUpdate(T *C, size_t centerLength, T **sequences, size_t num_sequences, size_t *sequence_lengths, int use_open_start, int use_open_end, T *updatedMean, std::string output_prefix, cudaStream_t stream) {
+DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_t num_sequences, size_t *sequence_lengths, int use_open_start, int use_open_end, T *updatedMean, std::string output_prefix, cudaStream_t stream) {
 	T *gpu_centroidAlignmentSums;
 	cudaMallocManaged(&gpu_centroidAlignmentSums, sizeof(T)*centerLength); CUERR("Allocating GPU memory for barycenter update sequence element sums");
 	cudaMemset(gpu_centroidAlignmentSums, 0, sizeof(T)*centerLength); CUERR("Initialzing GPU memory for barycenter update sequence element sums to zero");
@@ -494,7 +498,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, size_t num_sequences, size_t
 #endif
 		
 			std::string path_filename = output_prefix+std::string(".path")+std::to_string(seq_index)+".txt";
-			writeDTWPath(cpu_stepMatrix, path_filename.c_str(), sequences[seq_index], current_seq_length, cpu_centroid, centerLength, num_columns, num_rows, pathPitch, flip_seq_order);
+			writeDTWPath(cpu_stepMatrix, path_filename.c_str(), sequences[seq_index], sequence_names[seq_index], current_seq_length, cpu_centroid, centerLength, num_columns, num_rows, pathPitch, flip_seq_order);
 			cudaFreeHost(cpu_stepMatrix); CUERR("Freeing host memory for step matrix");
 		}
                 cudaFree(pathMatrix); CUERR("Freeing DTW path matrix in DBA cleanup");
@@ -657,6 +661,8 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		// Allocate storage for an array of pointers to just the sequences from this cluster, so we generate averages for each cluster independently
 		T **cluster_sequences;
 		cudaMallocManaged(&cluster_sequences, sizeof(T**)*num_members); CUERR("Allocating GPU memory for array of cluster member sequence pointers");
+		char **cluster_sequence_names;
+		cudaMallocManaged(&cluster_sequence_names, sizeof(char**)*num_members); CUERR("Allocating GPU memory for array of cluster member sequence name pointers");
 		size_t *member_lengths;
 		cudaMallocManaged(&member_lengths, sizeof(T*)*num_members); CUERR("Allocating GPU memory for array of cluster member sequence pointers");
 
@@ -664,6 +670,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		for (int i = 0; i < num_sequences; i++) {
                         if(sequences_membership[i] == currCluster){
 				cluster_sequences[num_members] = sequences[i];
+				cluster_sequence_names[num_members] = sequence_names[i];
 				member_lengths[num_members] = sequence_lengths[i];
                                 num_members++;
                         }
@@ -678,7 +685,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		for (int i = 0; i < maxRounds; i++) {
 			setupPercentageDisplay("Step 3 of 3 (round " + std::to_string(i+1) +  " of max " + std::to_string(maxRounds) + 
 				       " to achieve delta 0) for cluster " + std::to_string(currCluster+1) + "/" + std::to_string(num_clusters) + ": Converging centroid");
-			double delta = DBAUpdate(gpu_barycenter, medoidLength, cluster_sequences, num_members, member_lengths, use_open_start, use_open_end, 
+			double delta = DBAUpdate(gpu_barycenter, medoidLength, cluster_sequences, cluster_sequence_names, num_members, member_lengths, use_open_start, use_open_end, 
 					         new_barycenter, CONCAT3(output_prefix, ".", std::to_string(currCluster)), stream);
 			teardownPercentageDisplay();
 			std::cerr << "New delta is " << delta << std::endl;
@@ -702,6 +709,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		}
 		// Clean up the GPU memory we don't need any more.
 		cudaFree(cluster_sequences); CUERR("Freeing GPU memory for array of cluster member sequence pointers");
+		cudaFree(cluster_sequence_names); CUERR("Freeing GPU memory for array of cluster member sequence name pointers");
 		cudaFree(member_lengths); CUERR("Freeing GPU memory for array of cluster member lengths");
 		cudaFree(gpu_barycenter); CUERR("Freeing GPU memory for barycenter");
 

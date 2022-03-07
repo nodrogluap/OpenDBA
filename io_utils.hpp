@@ -57,12 +57,13 @@ int writeDTWPathMatrix(unsigned char *cpu_stepMatrix, const char *step_filename,
 
 template <typename T>
 __host__
-int writeDTWPath(unsigned char *cpu_pathMatrix, const char *filename, T *gpu_seq, size_t gpu_seq_len, T *cpu_centroid, size_t cpu_centroid_len, size_t num_columns, size_t num_rows, size_t pathPitch, int flip_seq_order){
+int writeDTWPath(unsigned char *cpu_pathMatrix, const char *filename, T *gpu_seq, char *cpu_seqname, size_t gpu_seq_len, T *cpu_centroid, size_t cpu_centroid_len, size_t num_columns, size_t num_rows, size_t pathPitch, int flip_seq_order){
 	std::ofstream path(filename);
 	if(!path.is_open()){
         	std::cerr << "Cannot write to " << filename << std::endl;
         	return CANNOT_WRITE_DTW_PATH;
 	}
+	path << cpu_seqname << std::endl;
 
 	T *cpu_seq;
 	cudaMallocHost(&cpu_seq, sizeof(T)*gpu_seq_len); CUERR("Allocating CPU memory for query seq in DTW path printing");

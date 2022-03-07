@@ -41,7 +41,7 @@ tests/openDBA_test.o: tests/openDBA_test.cu openDBA.cuh segmentation.hpp cpu_uti
 	nvcc -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
 
 tests/openDBA_test: Makefile tests/openDBA_test.o multithreading.o submodules/hclust-cpp/fastcluster.o
-	nvcc $(NVCC_FLAGS) --compiler-options -fPIC tests/openDBA_test.o multithreading.o submodules/hclust-cpp/fastcluster.o -o tests/openDBA_test
+	nvcc $(NVCC_FLAGS) --compiler-options "-fPIC -no-pie" tests/openDBA_test.o multithreading.o submodules/hclust-cpp/fastcluster.o -o tests/openDBA_test
 
 tests: tests/openDBA_test
 	cd tests; ./openDBA_test
