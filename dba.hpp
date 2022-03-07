@@ -97,6 +97,7 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 		// eventually release to launch more kernels as free memory increases (if it's not already limited by the kernel grid block queue).
 		addStreamCleanupCallback(dtwCostSoFar, newDtwCostSoFar, 0, seq_stream);
 	}
+	std::cerr << std::endl;
         cudaFreeHost(maxThreads); CUERR("Freeing CPU memory for device thread properties");
 	// TODO: use a fancy cleanup thread barrier here so that multiple DBAs could be running on the same device and not interfere with each other at this step.
 	for(int i = 0; i < deviceCount; i++){
@@ -142,6 +143,9 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 		index_offset += num_sequences - seq_index - 1;
 		mats << std::endl;
 	}
+	
+	// If sequences are the same then max_distance would be 0. We set it to 1 because any number divided by 1 will still be itself. Saves us from dividing by 0 later.
+	if(max_distance == 0) max_distance = 1;
 	// Last line is pro forma as all pair distances have already been printed
 	mats << sequence_names[num_sequences-1];
 	for(size_t pad = 0; pad < num_sequences; ++pad){
