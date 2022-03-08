@@ -574,11 +574,19 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 #endif
 
 	// Z-normalize the sequences to match the in parallel on the GPU, once all the async memcpy calls are done.
+	// Because this normalizatios in-place to save memory, and we are wanting to scale the averaged sequences back to their original range after the DBA calculations,
+	// the most efficient thing to do is just store the mu and sigma values for all seqs so the medoids' specs can be restored after averaging without having 
+	// kept a copy of the original data in memory.
+	double *sequence_means;
+	double *sequence_sigmas;
 	if(norm_sequences){
+		cudaMallocManaged(&sequence_means, sizeof(double)*num_sequences); CUERR("Allocating managed memory for array of sequence means");
+		cudaMallocManaged(&sequence_sigmas, sizeof(double)*num_sequences); CUERR("Allocating managed memory for array of sequence sigmas");
+
 #if DEBUG == 1
 		std::cerr << "Normalizing " << num_sequences << " input streams (longest is " << maxLength << ")" << std::endl;
 #endif
-	       	normalizeSequences(sequences, num_sequences, sequence_lengths, -1, stream);
+	       	normalizeSequences(sequences, num_sequences, sequence_lengths, -1, sequence_means, sequence_sigmas, stream);
 	}
 
 	T *gpu_sequences = 0;
@@ -696,6 +704,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 			// centroids in perpetuity, so never really "converging". Handle this case with a shortcircuit.
 			if(use_open_start || use_open_end){
 				if(i >= 1 && !memcmp(new_barycenter, two_previous_barycenter, sizeof(T)*medoidLength)){
+					std::cerr << "Detected a flip-flop between two alternative converged centroids (should happen only in open end mode), keeping the first one calculated" << std::endl;
 					break;
 				}
 				if(i > 1){
@@ -715,17 +724,8 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 
 		if(norm_sequences) {
 			/* Rescale the average to the centroid's value range. */
-			double medoidAvg = (double) 0.0f;
-			double medoidStdDev = (double) 0.0f;
-			T *medoidSequence = sequences[medoidIndices[currCluster]];
-			for(int i = 0; i < medoidLength; i++){
-				medoidAvg += medoidSequence[i];
-			}
-			medoidAvg /= medoidLength;
-			for(int i = 0; i < medoidLength; i++){
-				medoidStdDev += (medoidAvg - medoidSequence[i])*(medoidAvg - medoidSequence[i]);
-			}
-			medoidStdDev = sqrt(medoidStdDev/medoidLength);
+			double medoidAvg = sequence_means[medoidIndices[currCluster]];
+ 			double medoidStdDev = sequence_sigmas[medoidIndices[currCluster]];
 			//std::cout << "Rescaling centroid to medoid's mean and std dev: " << medoidAvg << ", " << medoidStdDev << std::endl;
 			for(int i = 0; i < medoidLength; i++){
 				new_barycenter[i] = (T) (medoidAvg+new_barycenter[i]*medoidStdDev);
@@ -741,6 +741,10 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 			cudaFreeHost(previous_barycenter); CUERR("Allocating CPU memory for previous DBA update result");
 			cudaFreeHost(two_previous_barycenter); CUERR("Allocating CPU memory for two back DBA update result");
 		}
+	}
+	if(norm_sequences){
+		cudaFree(sequence_means);
+		cudaFree(sequence_sigmas);
 	}
         avgs_file.close();
 
