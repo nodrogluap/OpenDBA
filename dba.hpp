@@ -65,11 +65,11 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 		while(freeGPUMem < dtwCostSoFarSize){
 			//std::this_thread::sleep_for(std::chrono::seconds(1));
 			#ifdef _WIN32
-				Sleep(1);
+				Sleep(1000);
 			#else
-				usleep(1000);
+				usleep(1000000);
 			#endif
-			//std::cerr << "Waiting for memory to be freed before launching " << std::endl;
+			std::cerr << "Waiting for memory to be freed before launching " << std::endl;
 			cudaMemGetInfo(&freeGPUMem, &totalGPUMem);
 		}
 		dotsPrinted = updatePercentageComplete(seq_index+1, num_sequences-1, dotsPrinted);
@@ -217,8 +217,8 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 		// Negative number means we want to use permutation statistics supported cluster building
 		float cluster_p_value = 0.05;
 		merge_clusters(gpu_sequences, sequence_lengths, num_sequences, cpu_dtwPairwiseDistances, merge, cluster_p_value, 
-			       memberships, use_open_start, use_open_end, stream);
-*/
+			       memberships, use_open_start, use_open_end, stream); 
+		*/
 	}
 	delete[] merge;
 	delete[] height;
@@ -367,6 +367,10 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 
 	int deviceCount;
         cudaGetDeviceCount(&deviceCount); CUERR("Getting GPU device count in DBA update function");
+#if DEBUG == 1
+	// Device parallelism is not compatible with debug printing of intermediate path cost matrix columns
+	deviceCount = 1;
+#endif
         unsigned int *maxThreads = getMaxThreadsPerDevice(deviceCount);
 
 	unsigned int *nElementsForMean, *cpu_nElementsForMean;
@@ -378,64 +382,68 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
         cudaDeviceGetStreamPriorityRange(&priority_low, &priority_high);
         descendingPriority = priority_high;
 
-	// TODO: special case if there are two sequences, no convergence is necessary so some of the below can be skipped
         // Allocate space for the dtwCost to get to each point on the border between grid vertical swaths of the total cost matrix against the consensus C.
 	// Generate the path matrix though for each sequence relative to the centroid, and update the centroid means accordingly.
 	int dotsPrinted = 0;
-        for(size_t seq_index = 0; seq_index <= num_sequences-1; seq_index++){
-                dim3 threadblockDim(maxThreads[0], 1, 1); //TODO: parallelize across devices
-                size_t current_seq_length = sequence_lengths[seq_index];
+       	size_t current_seq_length[deviceCount];
+	int flip_seq_order[deviceCount]; // boolean
+        cudaStream_t seq_stream[deviceCount];
+	T **dtwCostSoFar = new T * [deviceCount];
+        T **newDtwCostSoFar = new T * [deviceCount];
+       	size_t pathPitch[deviceCount];
+       	unsigned char **pathMatrix = new unsigned char *[deviceCount];
+	for(size_t seq_index = 0; seq_index < num_sequences; seq_index++){
+                int currDevice = seq_index%deviceCount;
+                cudaSetDevice(currDevice);
+                dim3 threadblockDim(maxThreads[currDevice], 1, 1);
+                current_seq_length[currDevice] = sequence_lengths[seq_index];
+
                 // We are allocating each time rather than just once at the start because if the sequences have a large
                 // range of lengths and we sort them from shortest to longest we will be allocating the minimum amount of
                 // memory necessary.
-                size_t pathMatrixSize = sizeof(unsigned char)*current_seq_length*centerLength;
+                size_t pathMatrixSize = sizeof(unsigned char)*current_seq_length[currDevice]*centerLength;
                 size_t freeGPUMem;
                 size_t totalGPUMem;
-                size_t dtwCostSoFarSize = sizeof(T)*current_seq_length;
-		int flip_seq_order = 0;
-		if(use_open_end && centerLength < current_seq_length){
-			flip_seq_order = 1;
+                size_t dtwCostSoFarSize = sizeof(T)*current_seq_length[currDevice];
+		flip_seq_order[currDevice] = 0;
+		if(use_open_end && centerLength < current_seq_length[currDevice]){
+			flip_seq_order[currDevice] = 1;
 			dtwCostSoFarSize = sizeof(T)*centerLength;
 		}
                 cudaMemGetInfo(&freeGPUMem, &totalGPUMem);
                 while(freeGPUMem < dtwCostSoFarSize+pathMatrixSize*1.05){ // assume pitching could add up to 5%
                         #ifdef _WIN32
-							Sleep(1);
-						#else
-							usleep(1000);
-						#endif
-                        //std::cerr << "Waiting for memory to be freed before launching " << std::endl;
+				Sleep(1000);
+			#else
+				usleep(1000000);
+			#endif
+                        std::cerr << "Waiting for memory (free "  << freeGPUMem << " < required " << dtwCostSoFarSize+pathMatrixSize*1.05 << ") before launching seq " << seq_index << " on device " << currDevice << std::endl;
                         cudaMemGetInfo(&freeGPUMem, &totalGPUMem);
                 }
 
 		dotsPrinted = updatePercentageComplete(seq_index+1, num_sequences, dotsPrinted);
 
-		T *dtwCostSoFar = 0;
-		T *newDtwCostSoFar = 0;
-                cudaMallocManaged(&dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values in DBA update");
-                cudaMallocManaged(&newDtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for new DTW pairwise distance intermediate values in DBA update");
+                cudaMalloc(&dtwCostSoFar[currDevice], dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values in DBA update");
+                cudaMalloc(&newDtwCostSoFar[currDevice], dtwCostSoFarSize);  CUERR("Allocating GPU memory for new DTW pairwise distance intermediate values in DBA update");
 
 		// Under the assumption that long sequences have the same or more information than the centroid, flip the DTW comparison so the centroid has an open end.
 		// Otherwise you're cramming extra sequence data into the wrong spot and the DTW will give up and choose an all-up then all-open right path instead of a diagonal,
 		// which messes with the consensus building.
-        	size_t pathPitch;
-        	unsigned char *pathMatrix = 0;
 		// Column major allocation x-axis is 2nd seq
-        	if(flip_seq_order){
-			cudaMallocPitch(&pathMatrix, &pathPitch, current_seq_length, centerLength); CUERR("Allocating pitched GPU memory for centroid:sequence path matrix");
+        	if(flip_seq_order[currDevice]){
+			cudaMallocPitch(&pathMatrix[currDevice], &pathPitch[currDevice], current_seq_length[currDevice], centerLength); CUERR("Allocating pitched GPU memory for centroid:sequence path matrix");
 		}
 		else{
-			cudaMallocPitch(&pathMatrix, &pathPitch, centerLength, current_seq_length); CUERR("Allocating pitched GPU memory for sequence:centroid path matrix");
+			cudaMallocPitch(&pathMatrix[currDevice], &pathPitch[currDevice], centerLength, current_seq_length[currDevice]); CUERR("Allocating pitched GPU memory for sequence:centroid path matrix");
 		}
 
                 // Make calls to DTWDistance serial within each seq, but allow multiple seqs on the GPU at once.
-                cudaStream_t seq_stream;
-                cudaStreamCreateWithPriority(&seq_stream, cudaStreamNonBlocking, descendingPriority); CUERR("Creating prioritized CUDA stream");
+                cudaStreamCreateWithPriority(&seq_stream[currDevice], cudaStreamNonBlocking, descendingPriority); CUERR("Creating prioritized CUDA stream");
                 if(descendingPriority < priority_low){
                         descendingPriority++;
                 }
 
-		int dtw_limit = flip_seq_order ? current_seq_length : centerLength;
+		int dtw_limit = flip_seq_order[currDevice] ? current_seq_length[currDevice] : centerLength;
 #if DEBUG == 1
 		std::string cost_filename = std::string("costmatrix")+"."+std::to_string(seq_index);
 		std::ofstream cost(cost_filename);
@@ -449,20 +457,20 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
                         // We have a circular buffer in shared memory of three diagonals for minimal proper DTW calculation.
                         int shared_memory_required = threadblockDim.x*3*sizeof(T);
 			// 0 arg here means that we are not storing the pairwise distance (total cost) between the sequences back out to global memory.
-                        if(flip_seq_order){
+                        if(flip_seq_order[currDevice]){
 				// Specify both the first and second sequences explicitly (seq_index will actually be ignored)
-				DTWDistance<<<1,threadblockDim,shared_memory_required,seq_stream>>>(C, centerLength, sequences[seq_index], current_seq_length, PARAM_NOT_USED, offset_within_seq, (T *)PARAM_NOT_USED, PARAM_NOT_USED,
-                                                 num_sequences, (size_t *)PARAM_NOT_USED, dtwCostSoFar, newDtwCostSoFar, pathMatrix, pathPitch, (T *) PARAM_NOT_USED, use_open_start, use_open_end); CUERR("Consensus DTW vertical swath calculation with path storage");
-				cudaMemcpyAsync(dtwCostSoFar, newDtwCostSoFar, dtwCostSoFarSize, cudaMemcpyDeviceToDevice, seq_stream); CUERR("Copying DTW pairwise distance intermediate values with flipped sequence order");
+				DTWDistance<<<1,threadblockDim,shared_memory_required,seq_stream[currDevice]>>>(C, centerLength, sequences[seq_index], current_seq_length[currDevice], PARAM_NOT_USED, offset_within_seq, (T *)PARAM_NOT_USED, PARAM_NOT_USED,
+                                                 num_sequences, (size_t *)PARAM_NOT_USED, dtwCostSoFar[currDevice], newDtwCostSoFar[currDevice], pathMatrix[currDevice], pathPitch[currDevice], (T *) PARAM_NOT_USED, use_open_start, use_open_end); CUERR("Consensus DTW vertical swath calculation with path storage");
+				cudaMemcpyAsync(dtwCostSoFar[currDevice], newDtwCostSoFar[currDevice], dtwCostSoFarSize, cudaMemcpyDeviceToDevice, seq_stream[currDevice]); CUERR("Copying DTW pairwise distance intermediate values with flipped sequence order");
 			}
 			else{
 				// Specify both the first and second sequences explicitly (seq_index will actually be ignored)
-				DTWDistance<<<1,threadblockDim,shared_memory_required,seq_stream>>>(sequences[seq_index], current_seq_length, C, centerLength, PARAM_NOT_USED, offset_within_seq, (T *)PARAM_NOT_USED, PARAM_NOT_USED,
-                                                 num_sequences, (size_t *) PARAM_NOT_USED, dtwCostSoFar, newDtwCostSoFar, pathMatrix, pathPitch, (T *) PARAM_NOT_USED, use_open_start, use_open_end); CUERR("Sequence DTW vertical swath calculation with path storage");
-				cudaMemcpyAsync(dtwCostSoFar, newDtwCostSoFar, dtwCostSoFarSize, cudaMemcpyDeviceToDevice, seq_stream); CUERR("Copying DTW pairwise distance intermediate values without flipped sequence order");
+				DTWDistance<<<1,threadblockDim,shared_memory_required,seq_stream[currDevice]>>>(sequences[seq_index], current_seq_length[currDevice], C, centerLength, PARAM_NOT_USED, offset_within_seq, (T *)PARAM_NOT_USED, PARAM_NOT_USED,
+                                                 num_sequences, (size_t *) PARAM_NOT_USED, dtwCostSoFar[currDevice], newDtwCostSoFar[currDevice], pathMatrix[currDevice], pathPitch[currDevice], (T *) PARAM_NOT_USED, use_open_start, use_open_end); CUERR("Sequence DTW vertical swath calculation with path storage");
+				cudaMemcpyAsync(dtwCostSoFar[currDevice], newDtwCostSoFar[currDevice], dtwCostSoFarSize, cudaMemcpyDeviceToDevice, seq_stream[currDevice]); CUERR("Copying DTW pairwise distance intermediate values without flipped sequence order");
 			}
-			cudaStreamSynchronize(seq_stream);  CUERR("Synchronizing prioritized CUDA stream mid-path");
 #if DEBUG == 1
+			cudaStreamSynchronize(seq_stream[currDevice]);  CUERR("Synchronizing prioritized CUDA stream mid-path for debug output");
 			for(int i = 0; i < dtw_limit; i++){
 				cost << dtwCostSoFar[i] << ", ";
 			}
@@ -472,41 +480,52 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 #if DEBUG == 1
 		cost.close();
 #endif
+		updateCentroid<<<1,1,0,seq_stream[currDevice]>>>(sequences[seq_index], gpu_centroidAlignmentSums, nElementsForMean, pathMatrix[currDevice], centerLength, current_seq_length[currDevice], pathPitch[currDevice], flip_seq_order[currDevice]);
 
-		updateCentroid<<<1,1,0,seq_stream>>>(sequences[seq_index], gpu_centroidAlignmentSums, nElementsForMean, pathMatrix, centerLength, current_seq_length, pathPitch, flip_seq_order);
-                // Will cause memory to be freed in callback after seq DTW completion, so the sleep_for() polling above can
-                // eventually release to launch more kernels as free memory increases (if it's not already limited by the kernel grid block queue).
-		cudaStreamSynchronize(seq_stream); CUERR("Synchronizing prioritized CUDA stream in DBA update before cleanup");
-                cudaFree(dtwCostSoFar); CUERR("Freeing DTW intermediate cost values in DBA cleanup");
-                cudaFree(newDtwCostSoFar); CUERR("Freeing new DTW intermediate cost values in DBA cleanup");
-        	cudaStreamDestroy(seq_stream); CUERR("Removing a CUDA stream after completion of DBA cleanup");
+		// After all available the kernel calls have been queued across available devices, wait for them all to finish before launching
+		// the next set of calls (e.g. if 3 devices, but 14 sequences to process we will sync after queueing seq #3, then after #6, #9, #12, #14). 
+		if(currDevice != deviceCount-1 && seq_index+1 < num_sequences){
+			continue; // more to queue up for parallel execution
+		}
 
-		int num_columns = centerLength;
-		int num_rows = current_seq_length;
-		if(flip_seq_order){int tmp = num_rows; num_rows = num_columns; num_columns = tmp;}
+		/*** EVERYTHING BELOW HERE IS EFFECTIVELY CONDITIONALLY EXECUTED !! ***/
+		for(int queuedDevice = 0; queuedDevice <= currDevice; queuedDevice++){
+			cudaStreamSynchronize(seq_stream[queuedDevice]);  CUERR("Synchronizing prioritized CUDA stream in device-parallel update of sequence-centroid path calculations");
+                	// Will cause memory to be freed in callback after seq DTW completion, so the sleep_for() polling above can
+                	// eventually release to launch more kernels as free memory increases (if it's not already limited by the kernel grid block queue).
+                	cudaFree(dtwCostSoFar[queuedDevice]); CUERR("Freeing DTW intermediate cost values in DBA cleanup");
+                	cudaFree(newDtwCostSoFar[queuedDevice]); CUERR("Freeing new DTW intermediate cost values in DBA cleanup");
+        		cudaStreamDestroy(seq_stream[queuedDevice]); CUERR("Removing a CUDA stream after completion of DBA cleanup");
+
+			int num_columns = centerLength;
+			int num_rows = current_seq_length[queuedDevice];
+			if(flip_seq_order[queuedDevice]){int tmp = num_rows; num_rows = num_columns; num_columns = tmp;}
 		
-		unsigned char *cpu_stepMatrix = 0;
+			unsigned char *cpu_stepMatrix = 0;
 		
-		if(!output_prefix.empty()){
-	        	cudaMallocHost(&cpu_stepMatrix, sizeof(unsigned char)*pathPitch*num_rows); CUERR("Allocating CPU memory for step matrix");
-        		cudaMemcpy(cpu_stepMatrix, pathMatrix, sizeof(unsigned char)*pathPitch*num_rows, cudaMemcpyDeviceToHost);  CUERR("Copying GPU to CPU memory for step matrix");
+			if(!output_prefix.empty()){
+	        		cudaMallocHost(&cpu_stepMatrix, sizeof(unsigned char)*pathPitch[queuedDevice]*num_rows); CUERR("Allocating CPU memory for step matrix");
+        			cudaMemcpy(cpu_stepMatrix, pathMatrix[queuedDevice], sizeof(unsigned char)*pathPitch[queuedDevice]*num_rows, cudaMemcpyDeviceToHost);  CUERR("Copying GPU to CPU memory for step matrix in DBA update");
 
 #if DEBUG == 1
-			/* Start of debugging code, which saves the DTW path for each sequence vs. consensus. Requires C++11 compatibility. */
-			std::string step_filename = output_prefix+std::string("stepmatrix")+std::to_string(seq_index);
-			writeDTWPathMatrix<T>(cpu_stepMatrix, step_filename.c_str(), num_columns, num_rows, pathPitch);
+				/* Start of debugging code, which saves the DTW path for each sequence vs. consensus. Requires C++11 compatibility. */
+				std::string step_filename = output_prefix+std::string("stepmatrix")+std::to_string(seq_index-currDevice+queuedDevice);
+				writeDTWPathMatrix<T>(cpu_stepMatrix, step_filename.c_str(), num_columns, num_rows, pathPitch[queuedDevice]);
 #endif
 		
-			std::string path_filename = output_prefix+std::string(".path")+std::to_string(seq_index)+".txt";
-			writeDTWPath(cpu_stepMatrix, path_filename.c_str(), sequences[seq_index], sequence_names[seq_index], current_seq_length, cpu_centroid, centerLength, num_columns, num_rows, pathPitch, flip_seq_order);
-			cudaFreeHost(cpu_stepMatrix); CUERR("Freeing host memory for step matrix");
+				std::string path_filename = output_prefix+std::string(".path")+std::to_string(seq_index-currDevice+queuedDevice)+".txt";
+				writeDTWPath(cpu_stepMatrix, path_filename.c_str(), sequences[seq_index-currDevice+queuedDevice], sequence_names[seq_index-currDevice+queuedDevice], current_seq_length[queuedDevice], cpu_centroid, centerLength, num_columns, num_rows, pathPitch[queuedDevice], flip_seq_order[queuedDevice]);
+				cudaFreeHost(cpu_stepMatrix); CUERR("Freeing host memory for step matrix");
+			}
+                	cudaFree(pathMatrix[queuedDevice]); CUERR("Freeing DTW path matrix in DBA cleanup");
 		}
-                cudaFree(pathMatrix); CUERR("Freeing DTW path matrix in DBA cleanup");
 
         }
 	cudaFreeHost(maxThreads); CUERR("Freeing CPU memory for device thread properties");
-	// TODO: use a fancy cleanup thread barrier here so that multiple DBAs could be running on the same device and not interfere with each other at this step.
-        cudaDeviceSynchronize(); CUERR("Synchronizing CUDA device after all DTW calculations");
+
+	// Everything generated in the device-specific streams should be synced when we get here, so this is perfunctory. 
+	// Multiple DBAs could be running on the same device and not interfere with each other at this step.
+        cudaStreamSynchronize(stream); CUERR("Synchronizing master CUDA stream after all DBA update DTW calculations and centroid updates");
 
 	cudaMemcpy(cpu_nElementsForMean, nElementsForMean, sizeof(T)*centerLength, cudaMemcpyDeviceToHost); CUERR("Copying barycenter update sequence pileup from GPU to CPU");
 	cudaMemcpy(updatedMean, gpu_centroidAlignmentSums, sizeof(T)*centerLength, cudaMemcpyDeviceToHost); CUERR("Copying barycenter update sequence element sums from GPU to CPU");
