@@ -87,13 +87,17 @@ __global__ void calc_sum_of_squares(T **sequences, size_t num_sequences, size_t 
 
 // Z-norm
 template<typename T>
-__global__ void rescale_sequences(T **sequences, size_t num_sequences, size_t *sequence_lengths, T *sequence_sums, ACCUMULATOR_PRIMITIVE_TYPE *sequence_sum_of_squares, double target_mean, double target_stddev){
+__global__ void rescale_sequences(T **sequences, size_t num_sequences, size_t *sequence_lengths, T *sequence_sums, ACCUMULATOR_PRIMITIVE_TYPE *sequence_sum_of_squares, double target_mean, double target_stddev, double *sequence_means, double * sequence_sigmas){
         // grid X index is the sequence to be processed, grid Y is the chunk of that sequence to process (each chunk is thread block sized)
         size_t seq_pos = blockIdx.y*blockDim.x+threadIdx.x;
         size_t seq_length = sequence_lengths[blockIdx.x];
         if(seq_pos < seq_length){ // Coalesced global mem reads
 		double seq_mean = sequence_sums[blockIdx.x]/((double) seq_length);
+		// Write it out for later use if asked to do so
+		if(sequence_means != 0){sequence_means[blockIdx.x] = seq_mean;}
 		double seq_stddev = sqrt(sequence_sum_of_squares[blockIdx.x]/((double) seq_length));
+		// Write it out for later use if asked to do so
+		if(sequence_sigmas != 0){sequence_sigmas[blockIdx.x] = seq_stddev;}
                 // If a data series was present that was all constant values, the std dev will be zero and cause problems (division by zero). 
                 // Since in this case each sequence value is the seq_mean, we can just set seq_stddev to any non zero value and it will evaluate properly, since   
                 // the numerator will be zero anyways.
@@ -106,7 +110,7 @@ __global__ void rescale_sequences(T **sequences, size_t num_sequences, size_t *s
 
 // Convert the data on each device into a normalized form.
 template<typename T>
-__host__ void normalizeSequences(T **sequences, size_t num_sequences, size_t *sequence_lengths, int refSequenceIndex, cudaStream_t stream){
+__host__ void normalizeSequences(T **sequences, size_t num_sequences, size_t *sequence_lengths, int refSequenceIndex, double *sequence_means, double *sequence_sigmas, cudaStream_t stream){
         // grid X index is the sequence to be processed, grid Y is the chunk of that sequence to process (each chunk is thread block sized)
         dim3 threadblockDim(CUDA_WARP_WIDTH*CUDA_WARP_WIDTH, 1, 1);
 	int maxSeqLength = 0;
@@ -127,7 +131,7 @@ __host__ void normalizeSequences(T **sequences, size_t num_sequences, size_t *se
 
 	// Not a valid index, so rescale each sequence to have a mean of 0 and a standard deviation of 1 (i.e. Z-normalize)
 	if(refSequenceIndex < 0 || refSequenceIndex >= num_sequences){
-        	rescale_sequences<<<gridDim,threadblockDim,0,stream>>>(sequences, num_sequences, sequence_lengths, sequence_sums, sequence_sum_of_squares, 0, 1); CUERR("Z-normalizing sequences");
+        	rescale_sequences<<<gridDim,threadblockDim,0,stream>>>(sequences, num_sequences, sequence_lengths, sequence_sums, sequence_sum_of_squares, 0, 1, sequence_means, sequence_sigmas); CUERR("Z-normalizing sequences");
 	}
 	else{
 		T target_mean, target_std_dev;
@@ -137,9 +141,14 @@ __host__ void normalizeSequences(T **sequences, size_t num_sequences, size_t *se
 		target_mean /= seq_length;
 		cudaMemcpy(&target_std_dev, sequence_sum_of_squares+refSequenceIndex, sizeof(T), cudaMemcpyDeviceToHost); CUERR("Copying reference sequence's sum of squares to host");
 		target_std_dev = sqrt(target_std_dev);
-        	rescale_sequences<<<gridDim,threadblockDim,0,stream>>>(sequences, num_sequences, sequence_lengths, sequence_sums, sequence_sum_of_squares, target_mean, target_std_dev); CUERR("Rescaling sequences to target mean and std dev");
+        	rescale_sequences<<<gridDim,threadblockDim,0,stream>>>(sequences, num_sequences, sequence_lengths, sequence_sums, sequence_sum_of_squares, target_mean, target_std_dev, sequence_means, sequence_sigmas); CUERR("Rescaling sequences to target mean and std dev");
 	}
 
+}
+
+template<typename T>
+__host__ void normalizeSequences(T **gpu_sequences, size_t num_sequences, size_t *sequence_lengths, int refSequenceIndex, cudaStream_t stream){
+	normalizeSequences<T>(gpu_sequences, num_sequences, sequence_lengths, -1, (double *) 0, (double *) 0, stream);
 }
 
 template<typename T>
