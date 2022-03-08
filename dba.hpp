@@ -645,8 +645,19 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 			std::cerr << "Outputting singleton sequence " << sequence_names[medoidIndices[currCluster]] << 
 				     " as-is (a.k.a. cluster " << (currCluster+1) << "/" << num_clusters << ")." << std::endl;
 			avgs_file << sequence_names[medoidIndices[currCluster]];
-        		for (size_t i = 0; i < medoidLength; ++i) { 
-				avgs_file << "\t" << (sequences[medoidIndices[currCluster]])[i]; 
+			T *seq = sequences[medoidIndices[currCluster]];
+			if(norm_sequences) {
+                        	/* Rescale to ~original range (may have some floating point precision loss). */
+                        	double seqAvg = sequence_means[medoidIndices[currCluster]];
+                        	double seqStdDev = sequence_sigmas[medoidIndices[currCluster]];
+        			for (size_t i = 0; i < medoidLength; ++i) { 
+                                        avgs_file << "\t" << ((T) (seqAvg+seq[i]*seqStdDev));
+				}
+			}
+			else{
+				for (size_t i = 0; i < medoidLength; ++i) {
+                                        avgs_file << "\t" << seq[i];
+				}
 			}
 			avgs_file << std::endl;
 			continue;
