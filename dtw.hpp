@@ -11,14 +11,14 @@ using namespace cudahack; // for device side numeric_limits
 #define DIAGONAL 1
 #define RIGHT 2
 #define UP 3
-// Special move designations that do not affect backtracking algorithm per se, but does affect cost (open=no accumulation of cost for rightward move). 
+// Special move designations that do not differently affect backtracking algorithm per se, but does affect cost (open=no accumulation of cost for rightward move). 
 #define OPEN_RIGHT 4 
-#define NIL_OPEN_RIGHT 254 
+#define NIL_OPEN_RIGHT 5 
 
 // For two series I & J, encode that the cost matrix DTW path (i,j) backtracking index decrement options for the DTW steps declared above are:
-// unset (0) => (-1, -1), DIAGONAL => (-1,-1), RIGHT => (0,-1), UP => (-1,0), OPEN_RIGHT => (0,-1)
-__device__ __constant__ short moveI[] = { -1, -1, 0, -1, 0 };
-__device__ __constant__ short moveJ[] = { -1, -1, -1, 0, -1 };
+// unset (0) => (-1, -1), DIAGONAL => (-1,-1), RIGHT => (0,-1), UP => (-1,0), OPEN_RIGHT => (0,-1), OPEN_RIGHT and NIL_OPEN_RIGHT as per RIGHT
+__device__ __constant__ short moveI[] = { -1, -1, 0, -1, 0, 0, 0 };
+__device__ __constant__ short moveJ[] = { -1, -1, -1, 0, -1, -1, -1 };
 
 // How to find the 1D index of (X,Y) in the pitched (i.e. coalescing memory access aligned) memory for the DTW path matrix
 #define pitchedCoord(Column,Row,mem_pitch) ((size_t) ((Row)*(mem_pitch))+(Column))
@@ -247,7 +247,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 			if(use_open_end && !use_open_start || !use_open_end && use_open_start){
 				dtwPairwiseDistances[result_index] = (T) (sqrtf(newDtwCostSoFar[first_seq_length-1])/first_seq_length);
 			}
-			else{ // use the distance as-is (similar length seqwuences will tend tocluster together)
+			else{ // use the distance as-is (similar length sequences will tend to cluster together)
 				dtwPairwiseDistances[result_index] = (T) sqrtf(newDtwCostSoFar[first_seq_length-1]);
 			}
 		}
