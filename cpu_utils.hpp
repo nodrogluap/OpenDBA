@@ -161,7 +161,7 @@ int
 scan_tsv_data(const char *text_file_name, size_t *num_sequences){
 
   	// Count the number of lines in the file (buffering 1MB on read for speed) so we know how much space to allocate for sequence pointers 
-  	std::ios::sync_with_stdio(false); // optimization
+  	// std::ios::sync_with_stdio(false); // optimization
   	const int SZ = 1024 * 1024;
   	std::vector <char> read_buffer( SZ );
   	std::ifstream ifs(text_file_name, std::ios::binary); // Don't bother translating EOL as we are counting only, so using binary mode (PC + *NIX) 

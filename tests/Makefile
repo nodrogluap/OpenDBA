@@ -36,6 +36,9 @@ DOUBLE_UNSUPPORTED=0
 # By default do not require HDF5 to compile (enable to allow reading Oxford Nanopore Technologies FAST5 files)
 HDF5_SUPPORTED=0
 DEBUG=1
+
+DIR := ${CURDIR}
+INCLUDE=$(DIR)/..
 # For kernel-side sqrt() support and getDeviceCount() calls respectively
 NVCC_FLAGS+= --expt-relaxed-constexpr -rdc=true -maxrregcount 26 
 
@@ -63,3 +66,6 @@ openDBA.o: openDBA_test.cu ../openDBA.cuh ../segmentation.hpp ../cpu_utils.hpp .
 	
 openDBA_test: openDBA_test.cu test_utils.cuh Makefile openDBA.o multithreading.o fastcluster.o
 	nvcc -std=c++11 $(NVCC_FLAGS) --compiler-options -fPIC openDBA.o multithreading.o fastcluster.o -o openDBA_test
+	
+io_utils_test: io_utils_test.cu ../io_utils.hpp ../cpu_utils.hpp multithreading.o
+	nvcc -std=c++11 -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) --compiler-options "-fPIC -no-pie" io_utils_test.cu multithreading.o -o io_utils_test
