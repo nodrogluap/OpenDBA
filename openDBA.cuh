@@ -8,14 +8,7 @@
 #include "dba.hpp"
 #include "segmentation.hpp"
 #include "io_utils.hpp"
-
-#define TEXT_READ_MODE 0
-#define BINARY_READ_MODE 1
-#define TSV_READ_MODE 2
-#if HDF5_SUPPORTED == 1
-#define FAST5_READ_MODE 3
-#endif
-
+#include "read_mode_codes.h"
 
 template<typename T>
 void
@@ -28,16 +21,17 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	T **segmented_sequences = 0;
 	size_t *segmented_seq_lengths = 0;
 	T **sequences = 0;
+	char** sequence_names;
 	int actual_num_series = 0; // excludes failed file reading
 
 	// Step 0. Read in data.
 	if(read_mode == BINARY_READ_MODE){ actual_num_series = readSequenceBinaryFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
 	// In the following two the sequence names are from inside the file, not the file names themselves
-	else if(read_mode == TSV_READ_MODE){ actual_num_series = readSequenceTSVFiles<T>(series_file_names, num_series, &sequences, &series_file_names, &sequence_lengths); }
+	else if(read_mode == TSV_READ_MODE){ actual_num_series = readSequenceTSVFiles<T>(series_file_names, num_series, &sequences, &sequence_names, &sequence_lengths); }
 #if HDF5_SUPPORTED == 1
 	else if(read_mode == FAST5_READ_MODE){ 
-		actual_num_series = readSequenceFAST5Files<T>(series_file_names, num_series, &sequences, &series_file_names, &sequence_lengths); 
-		writeSequences(sequences, sequence_lengths, series_file_names, actual_num_series, CONCAT2(output_prefix, ".seqs.txt").c_str());
+		actual_num_series = readSequenceFAST5Files<T>(series_file_names, num_series, &sequences, &sequence_names, &sequence_lengths); 
+		writeSequences(sequences, sequence_lengths, sequence_names, actual_num_series, CONCAT2(output_prefix, ".seqs.txt").c_str());
 	}
 #endif
 	else{ actual_num_series = readSequenceTextFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
@@ -49,7 +43,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	}
 
 	// Shorten sequence names to everything before the first "." in the file name
-	for (int i = 0; i < actual_num_series; i++){ char *z = strchr(series_file_names[i], '.'); if(z) *z = '\0';}
+	for (int i = 0; i < actual_num_series; i++){ char *z = strchr(sequence_names[i], '.'); if(z) *z = '\0';}
 
 	// Step 1. If a leading sequence was specified, chop it off all the inputs.
 	if(seqprefix_file_name != 0){
@@ -67,7 +61,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 			exit(CANNOT_READ_SEQUENCE_PREFIX_FILE);
 		}
 		setupPercentageDisplay("Opt-in Step: Chopping sequence prefixes");
-		chopPrefixFromSequences<T>(*seqprefix, *seqprefix_length, sequences, &actual_num_series, sequence_lengths, series_file_names, output_prefix, norm_sequences);
+		chopPrefixFromSequences<T>(*seqprefix, *seqprefix_length, sequences, &actual_num_series, sequence_lengths, sequence_names, output_prefix, norm_sequences);
 		teardownPercentageDisplay();
 		cudaFree(*seqprefix); CUERR("Freeing managed memory for the prefix sequence");
 		cudaFree(seqprefix); CUERR("Freeing managed memory for the prefix sequencers pointer");
@@ -83,7 +77,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 			// Sequences of length 1 are problematic as there is no meaningful warp to be performed, and they are almost certain to become the initial medoid.
 			// We therefore eliminate them.
 			if(segmented_seq_lengths[i] < 2){
-				std::cerr << "Removing segmented sequence '" << series_file_names[i] << "' of length " << segmented_seq_lengths[i]
+				std::cerr << "Removing segmented sequence '" << sequence_names[i] << "' of length " << segmented_seq_lengths[i]
 					  << " as it may unduly skew the convergence process. To retain this sequence, consider setting a smaller minimum segment size (currently " 
 					  << min_segment_length << ")" << std::endl;
 				cudaFree(segmented_sequences[i]); CUERR("Freeing managed memory for a discarded post-segmentation sequence");
@@ -94,7 +88,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 				actual_num_series--;
 			}
 		}
-		writeSequences(segmented_sequences, segmented_seq_lengths, series_file_names, actual_num_series, CONCAT2(output_prefix, ".segmented_seqs.txt").c_str());
+		writeSequences(segmented_sequences, segmented_seq_lengths, sequence_names, actual_num_series, CONCAT2(output_prefix, ".segmented_seqs.txt").c_str());
 		cudaFree(sequences); CUERR("Freeing managed memory for the presegmentation sequence pointers");
 		cudaFree(sequence_lengths); CUERR("Freeing managed memory for the presegmentation sequence lengths");
 		sequences = segmented_sequences;
@@ -102,16 +96,16 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	}
 
 	// Step 3. The meat of this meal!
-	performDBA<T>(sequences, actual_num_series, sequence_lengths, series_file_names, use_open_start, use_open_end, output_prefix, norm_sequences, cdist);
+	performDBA<T>(sequences, actual_num_series, sequence_lengths, sequence_names, use_open_start, use_open_end, output_prefix, norm_sequences, cdist, series_file_names, num_series, read_mode);
 
 	// Cleanup
 	for (int i = 0; i < actual_num_series; i++){ 
-		cudaFreeHost(series_file_names[i]); CUERR("Freeing CPU memory for a sequence name");
+		cudaFreeHost(sequence_names[i]); CUERR("Freeing CPU memory for a sequence name");
 		if(min_segment_length == 0){ // i.e. we still have the original seqs
 			cudaFree(sequences[i]); CUERR("Freeing managed memory for an original sequence");
 		}
 	}
-	cudaFreeHost(series_file_names); CUERR("Freeing CPU memory for the sequence names array");
+	cudaFreeHost(sequence_names); CUERR("Freeing CPU memory for the sequence names array");
 	cudaFree(sequences); CUERR("Freeing managed memory for the sequence pointers");
 	cudaFree(sequence_lengths); CUERR("Freeing managed memory for the sequence lengths");
 }

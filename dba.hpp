@@ -18,10 +18,12 @@
 #include "gpu_utils.hpp"
 #include "io_utils.hpp"
 #include "cuda_utils.hpp"
+#include "cpu_utils.hpp"
 #include "dtw.hpp"
 #include "clustering.cuh"
 #include "limits.hpp" // for CUDA kernel compatible max()
 #include "submodules/hclust-cpp/fastcluster.h"
+#include "read_mode_codes.h"
 
 using namespace cudahack; // for device-side numeric limits
 
@@ -564,7 +566,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
  *                the length of each member of the ragged array
  */
 template <typename T>
-__host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, int use_open_start, int use_open_end, char *output_prefix, int norm_sequences, double cdist, cudaStream_t stream=0) {
+__host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, int use_open_start, int use_open_end, char *output_prefix, int norm_sequences, double cdist, char** series_file_names, int num_series, int read_mode, cudaStream_t stream=0) {
 
 	// Sanitize the data from potential upstream artifacts or overflow situations
 	for(int i = 0; i < num_sequences; i++){
@@ -649,6 +651,16 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
                 std::cerr << "Cannot open sequence averages file " << output_prefix << ".avg.txt for writing" << std::endl;
                 exit(CANNOT_WRITE_DBA_AVG);
         }
+
+#if HDF5_SUPPORTED == 1
+	short **medoidSequences = 0;
+	char **medoidNames = 0;
+	size_t *medoidSeqLengths = 0;
+	
+	cudaMallocHost(&medoidSequences, sizeof(short*)*num_clusters);		 CUERR("Allocating GPU memory for medoid sequences");
+	cudaMallocHost(&medoidNames, sizeof(char*)*num_clusters);		 CUERR("Allocating GPU memory for medoid names");
+	cudaMallocHost(&medoidSeqLengths, sizeof(size_t)*num_clusters);		 CUERR("Allocating GPU memory for medoid lengths");
+#endif
 
 	for(int currCluster = 0; currCluster < num_clusters; currCluster++){
 		int num_members = 0;
@@ -766,17 +778,39 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 			avgs_file << "\t" << ((T *) new_barycenter)[i]; 
 		}
 		avgs_file << std::endl;
+		
+#if HDF5_SUPPORTED == 1
+		// Populate medoid buffers for writing fast5 output
+		medoidNames[currCluster] = sequence_names[medoidIndices[currCluster]];
+		medoidSeqLengths[currCluster] = medoidLength;
+		medoidSequences[currCluster] = templateToShort(new_barycenter, medoidSeqLengths[currCluster]);
+#endif
+		
 		cudaFreeHost(new_barycenter); CUERR("Allocating CPU memory for DBA update result");
 		if(use_open_start || use_open_end){
 			cudaFreeHost(previous_barycenter); CUERR("Allocating CPU memory for previous DBA update result");
 			cudaFreeHost(two_previous_barycenter); CUERR("Allocating CPU memory for two back DBA update result");
 		}
 	}
+	
 	if(norm_sequences){
 		cudaFree(sequence_means);
 		cudaFree(sequence_sigmas);
 	}
         avgs_file.close();
+	
+#if HDF5_SUPPORTED == 1
+	if(read_mode == FAST5_READ_MODE && num_series == 1){
+		std::cerr << "Writing medoids to new fast5 file..." << std::endl;
+		if(writeFast5Output(series_file_names[0], CONCAT2(output_prefix, ".avg.fast5").c_str(), medoidNames, medoidSequences, medoidSeqLengths, num_clusters) == 1){
+			std::cerr << "Cannot write updated sequences to new Fast5 file " << CONCAT2(output_prefix, ".avg.fast5").c_str() << ", aborting." << std::endl;
+			exit(CANNOT_WRITE_UPDATED_FAST5);
+		}
+		cudaFreeHost(medoidSequences);		 CUERR("Freeing GPU memory for medoid sequences");
+		cudaFreeHost(medoidNames);		 CUERR("Freeing GPU memory for medoid names");
+		cudaFreeHost(medoidSeqLengths);		 CUERR("Freeing GPU memory for medoid lengths");
+	}		
+#endif
 
 	delete[] medoidIndices;
 	delete[] sequences_membership;

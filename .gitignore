@@ -26,3 +26,4 @@ tests/*.txt
 
 # Test Fast5 Output Files
 tests/*.fast5
+*.fast5
