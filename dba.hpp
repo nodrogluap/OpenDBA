@@ -388,7 +388,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 #endif
         unsigned int *maxThreads = getMaxThreadsPerDevice(deviceCount);
 
-	unsigned int *nElementsForMean, *cpu_nElementsForMean;
+	unsigned int *nElementsForMean, *cpu_nElementsForMean; // Using unsigned int rather than size_t so we can use CUDA atomic operations on their GPU counterparts.
 	cudaMallocManaged(&nElementsForMean, sizeof(unsigned int)*centerLength); CUERR("Allocating GPU memory for barycenter update sequence pileup");
 	cudaMemset(nElementsForMean, 0, sizeof(unsigned int)*centerLength); CUERR("Initialzing GPU memory for barycenter update sequence pileup to zero");
 	cudaMallocHost(&cpu_nElementsForMean, sizeof(unsigned int)*centerLength); CUERR("Allocating CPU memory for barycenter sequence pileup");
@@ -684,13 +684,13 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 				writeDTWPathMatrix<T>(cpu_stepMatrix[queuedDevice], step_filename.c_str(), num_columns, num_rows, pathPitch[queuedDevice]);
 #endif
 		
-				writeDTWPath(cpu_stepMatrix[queuedDevice], cpu_backtrace_outputstream[currDevice], sequences[seq_index-currDevice+queuedDevice], 
+				writeDTWPath(cpu_stepMatrix[queuedDevice], cpu_backtrace_outputstream[queuedDevice], sequences[seq_index-currDevice+queuedDevice], 
 						sequence_names[seq_index-currDevice+queuedDevice], current_seq_length[queuedDevice], cpu_centroid, 
 						centerLength, num_columns, num_rows, pathPitch[queuedDevice], flip_seq_order[queuedDevice]);
 
 			}
-			(*(cpu_backtrace_outputstream[currDevice])).close();
-			delete *(cpu_backtrace_outputstream[currDevice]);
+			(*(cpu_backtrace_outputstream[queuedDevice])).close();
+			delete cpu_backtrace_outputstream[queuedDevice];
 			if(cpu_stepMatrix[queuedDevice]){
 				cudaFreeHost(cpu_stepMatrix[queuedDevice]); CUERR("Freeing host memory for step matrix");
 				cpu_stepMatrix[queuedDevice] = 0;
@@ -708,7 +708,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 	// Multiple DBAs could be running on the same device and not interfere with each other at this step.
         cudaStreamSynchronize(stream); CUERR("Synchronizing master CUDA stream after all DBA update DTW calculations and centroid updates");
 
-	cudaMemcpy(cpu_nElementsForMean, nElementsForMean, sizeof(T)*centerLength, cudaMemcpyDeviceToHost); CUERR("Copying barycenter update sequence pileup from GPU to CPU");
+	cudaMemcpy(cpu_nElementsForMean, nElementsForMean, sizeof(unsigned int)*centerLength, cudaMemcpyDeviceToHost); CUERR("Copying barycenter update sequence pileup from GPU to CPU");
 	cudaMemcpy(updatedMean, gpu_centroidAlignmentSums, sizeof(T)*centerLength, cudaMemcpyDeviceToHost); CUERR("Copying barycenter update sequence element sums from GPU to CPU");
 	cudaStreamSynchronize(stream);  CUERR("Synchronizing CUDA stream before computing centroid mean");
 	for (int t = 0; t < centerLength; t++) {
@@ -729,6 +729,14 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 		}
 	}
 	cudaFreeHost(cpu_centroid); CUERR("Freeing CPU memory for the incoming centroid");
+
+	delete[] dtwCostSoFar; // Play nice and clean up the dynamic heap allocations.
+        delete[] newDtwCostSoFar;
+        delete[] gpu_backtrace_rows;
+        delete[] pathMatrix;
+        delete[] cpu_backtrace_outputstream;
+        delete[] cpu_stepMatrix;
+
 	return max_delta;
 
 }
