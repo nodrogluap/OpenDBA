@@ -12,6 +12,7 @@ tests/costmatrix*
 tests/stepmatrix*
 tests/openDBA_test
 tests/path*
+tests/io_utils_test
 
 # lib files
 *.lib
@@ -21,3 +22,8 @@ tests/path*
 
 # txt files
 tests/*.txt
+*.txt
+
+# Test Fast5 Output Files
+tests/*.fast5
+*.fast5

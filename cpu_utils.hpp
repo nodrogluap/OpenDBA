@@ -39,6 +39,18 @@ unsigned int CountLines( const std::vector <char> & buff, int sz ) {
     return newlines;
 }
 
+// Function that converts a short to the given template value
+// data - the short buffer to be converted
+// data_length - the length of the buffer passed in
+// returns a new buffer that is of type template with the short data stored in it
+template <class T>
+short* templateToShort(T* data, size_t data_length){
+	short* return_data;
+	return_data = (short*)malloc(sizeof(short)*data_length);
+	std::transform(data, data + data_length, return_data, [](T s){ return (short)s; });
+	return return_data;
+}
+
 template <typename T>
 int
 read_binary_data(const char *binary_file_name, T **output_vals, size_t *num_output_vals){
@@ -161,7 +173,7 @@ int
 scan_tsv_data(const char *text_file_name, size_t *num_sequences){
 
   	// Count the number of lines in the file (buffering 1MB on read for speed) so we know how much space to allocate for sequence pointers 
-  	std::ios::sync_with_stdio(false); // optimization
+  	// std::ios::sync_with_stdio(false); // optimization
   	const int SZ = 1024 * 1024;
   	std::vector <char> read_buffer( SZ );
   	std::ifstream ifs(text_file_name, std::ios::binary); // Don't bother translating EOL as we are counting only, so using binary mode (PC + *NIX) 

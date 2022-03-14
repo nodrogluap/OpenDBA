@@ -5,6 +5,15 @@
 #include "dtw.hpp"
 #include "exit_codes.hpp"
 
+// For CONCAT definitions
+#include "cpu_utils.hpp"
+
+#if HDF5_SUPPORTED == 1
+extern "C"{
+  #include "hdf5.h"
+}
+#endif
+
 #define ARRAYSIZE(a) \
   ((sizeof(a) / sizeof(*(a))) / \
   static_cast<size_t>(!(sizeof(a) % sizeof(*(a)))))
@@ -126,6 +135,251 @@ int writePairDistMatrix(char *output_prefix, char **sequence_names, size_t num_s
         mats.close();
 	return 0;
 }
+
+#if HDF5_SUPPORTED == 1
+
+// Function to take a multi Fast5 file and take a selection of sequences from it. The Raw sequence data of the chosen sequences will be replaced with data passed in from the variable "sequences"
+// fast5_file_name - the fast5 file that we will be copying the sequences from
+// new_fast5_file - the name of the new fast5 file where the new data will be written
+// sequence_names - a list of the sequence names found in the fast5 file that will be copied over
+// sequences - the new sequence data that will be written to the new fast5 file
+// sequence_lengths - the lengths of the new sequences. These should equal the lengths of the matching sequences in the original fast5 file
+// num_sequences - the number of new sequences passed in
+// Returns 1 on a fail, 0 on success
+__host__
+int writeFast5Output(const char* fast5_file_name, const char* new_fast5_file, char** sequence_names, short** sequences, size_t *sequence_lengths, int num_sequences){
+	
+	// HDF5 variables needed
+	hid_t org_file_id, new_file_id, org_read_group, new_read_group, org_attr, new_attr, memtype, space, org_signal_dataset_id, signal_dataspace_id, new_group, new_dataset_prop_list, new_dataset;
+	hsize_t org_attr_size;
+	
+	// Initial copy of metadata
+	// Not sure if you can actually 'copy' this info, so for right now we're creating new data in the new file. Might want to see if this can just be copied in the future
+	
+	// Open Fast5 file we want to copy data from
+        if((org_file_id = H5Fopen(fast5_file_name, H5F_ACC_RDONLY, H5P_DEFAULT)) < 0){ 
+		std::cerr << "Error opening Fast5 file " << fast5_file_name << " Exiting." << std::endl;
+                return 1;
+        }
+	
+	// Create the new Fast5 file we want to write coppied data to
+	if((new_file_id = H5Fcreate(new_fast5_file, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT)) < 0){ 
+		std::cerr << "Error creating new Fast5 file " << new_fast5_file << " Exiting." << std::endl;
+                return 1;
+        }
+        H5Eset_auto1(NULL, NULL);
+	
+	// Open the base read group inside the original file
+	if((org_read_group = H5Gopen(org_file_id, "/", H5P_DEFAULT)) < 0){ 
+		std::cerr << "Error opening Group '/' from " << fast5_file_name << " Exiting." << std::endl;
+                return 1;
+        }
+	
+	// Open the file_type attribute inside of the / read group in the original file
+	// To be closed after use
+	if((org_attr = H5Aopen(org_read_group, "file_type", H5P_DEFAULT)) < 0){ 
+		std::cerr << "Error opening Attribute 'file_type' from " << fast5_file_name << " Exiting." << std::endl;
+                return 1;
+        }
+	
+	// Get the size of the data in file_type in the original file
+	if((org_attr_size = H5Aget_storage_size(org_attr)) == 0){ 
+		std::cerr << "Error getting Attribute 'file_type' size from " << fast5_file_name << " Exiting." << std::endl;
+                return 1;
+        }
+	
+	// Get the type of the data in file_type in the original file
+	hid_t org_atype = H5Aget_type(org_attr);
+	char* data_buffer = (char*) std::malloc(org_attr_size);
+	
+	// Read in the data from the attribute file_type in the original file
+	if(H5Aread(org_attr, org_atype, (void*)data_buffer)){
+		std::cerr << "Error reading attribute 'file_type' from Fast5 file " << fast5_file_name << " Exiting." << std::endl;
+		return 1;
+	}
+	
+	// Open the base read group in the new file
+	if((new_read_group = H5Gopen(new_file_id, "/", H5P_DEFAULT)) < 0){
+		std::cerr << "Error opening Group '/' from " << new_fast5_file << " Exiting." << std::endl;
+                return 1;
+        }
+	
+	// Set the memory type of the new attribute to be a c string
+	memtype = H5Tcopy(H5T_C_S1);
+	if(H5Tset_size(memtype, org_attr_size)){
+		std::cerr << "Error assigning size for file_type in " << new_fast5_file << " Exiting." << std::endl;
+                return 1;
+	}
+	
+	// Create a new string scalar dataspace for the data
+	if((space = H5Screate(H5S_SCALAR)) < 0){
+		std::cerr << "Failed to create a scalar memory space specification in the HDF5 API, please report to the software author(s)." << std::endl;
+		exit(FAST5_HDF5_API_ERROR);
+        }
+	
+	// Create the new attribute with the above memtype and space
+	// To be closed after use
+	if((new_attr = H5Acreate(new_read_group, "file_type", memtype, space, H5P_DEFAULT, H5P_DEFAULT)) < 0){ 
+		std::cerr << "Error creating attribute 'file_type' for " << new_fast5_file << " Exiting." << std::endl;
+                return 1;
+        }
+	
+	// Write the new attribute to the new file
+	if(H5Awrite(new_attr, memtype, (void*)data_buffer)){
+		std::cerr << "Error writting attribute 'file_type' to Fast5 file " << new_fast5_file << " Exiting." << std::endl;
+		return 1;
+	}
+	
+	H5Aclose(org_attr);
+	H5Aclose(new_attr);
+	
+	// Open 'file_version' attribute in original file
+	if((org_attr = H5Aopen(org_read_group, "file_version", H5P_DEFAULT)) < 0){ 
+		std::cerr << "Error opening Attribute 'file_version' from " << fast5_file_name << " Exiting." << std::endl;
+                return 1;
+        }
+	
+	// Get size of 'file_version' attribute
+	if((org_attr_size = H5Aget_storage_size(org_attr)) == 0){ 
+		std::cerr << "Error getting Attribute 'file_version' size from " << fast5_file_name << " Exiting." << std::endl;
+                return 1;
+        }
+	
+	org_atype = H5Aget_type(org_attr);
+	data_buffer = (char*) std::realloc(data_buffer, org_attr_size);
+	
+	// Read in the data from the attribute file_version in the original file
+	if(H5Aread(org_attr, org_atype, (void*)data_buffer)){
+		std::cerr << "Error reading attribute 'file_version' from Fast5 file " << fast5_file_name << " Exiting." << std::endl;
+		return 1;
+	}
+	
+	if(H5Tset_size (memtype, org_attr_size)){
+		std::cerr << "Error assigning size for file_version in " << new_fast5_file << " Exiting." << std::endl;
+                return 1;
+	}
+	
+	// Create the new attribute with the above memtype and space
+	if((new_attr = H5Acreate(new_read_group, "file_version", memtype, space, H5P_DEFAULT, H5P_DEFAULT)) < 0){ 
+		std::cerr << "Error creating attribute 'file_version' for " << new_fast5_file << " Exiting." << std::endl;
+                return 1;
+        }
+	
+	// Write the new attribute to the new file
+	if(H5Awrite(new_attr, memtype, (void*)data_buffer)){
+		std::cerr << "Error writting attribute 'file_version' to Fast5 file " << new_fast5_file << " Exiting." << std::endl;
+		return 1;
+	}
+	
+	// Close what's no longer needed
+	H5Tclose(memtype);
+	H5Sclose(space);
+	
+	H5Aclose(org_attr);
+	H5Aclose(new_attr);
+	
+	H5Gclose(org_read_group);
+	H5Gclose(new_read_group);
+	
+	free(data_buffer);
+	
+	// End of metadata copy
+	// Start of reads copy
+	
+	for(int i = 0; i < num_sequences; i++){
+		
+		// Check if sequence exists in original Fast5 file
+		if(H5Oexists_by_name(org_file_id, CONCAT2("/", sequence_names[i]).c_str(), H5P_DEFAULT) == 0){
+			std::cerr << "Error. Sequence " << sequence_names[i] << " does not exist in Fast5 file " << fast5_file_name << " Exiting." << std::endl;
+			return 1;
+		}
+		
+		// Get Dataset for the Raw Signal of the sequence
+		if((org_signal_dataset_id = H5Dopen(org_file_id, (CONCAT3("/", sequence_names[i], "/Raw/Signal")).c_str(), H5P_DEFAULT)) < 0){
+			std::cerr << "Unable to open " << sequence_names[i] << " Signal in " << fast5_file_name << " Exiting." << std::endl;
+			return 1;
+		}
+		
+		// Get the Dataspace for the Raw Signal
+		if((signal_dataspace_id = H5Dget_space(org_signal_dataset_id)) < 0){
+			std::cerr << "Unable to get dataspace for " << sequence_names[i] << " Signal in " << fast5_file_name << " Exiting." << std::endl;
+			return 1;
+		}
+		
+		// Get the length of the Raw Signal and check if it matches with the length of the new sequence that will be replacing it
+		const hsize_t read_length = H5Sget_simple_extent_npoints(signal_dataspace_id);
+		if(read_length != sequence_lengths[i]){
+			std::cerr << "Length of sequence " << sequence_names[i] << " in Fast5 file " << fast5_file_name << " (" << read_length 
+				  << ") does not match length of sequence given (" << sequence_lengths[i] << ") Exiting." << std::endl;
+			return 1;
+		}
+		
+		// Copy over the data of the sequence in the original Fast5 file to the new Fast5 file
+		if(H5Ocopy(org_file_id, CONCAT2("/", sequence_names[i]).c_str(), new_file_id, CONCAT2("/", sequence_names[i]).c_str(), H5P_DEFAULT, H5P_DEFAULT)){
+			std::cerr << "Error copying Attribute 'file_type' from " << fast5_file_name << " to " << new_fast5_file << " Exiting." << std::endl;
+			return 1;
+		}
+		
+		// Create a space that will be the size of the sequence length and have a max size of H5S_UNLIMITED
+		hsize_t max_dims = H5S_UNLIMITED;
+		if((space = H5Screate_simple(1, &read_length, &max_dims)) < 0){
+			std::cerr << "Failed to create a simple memory space specification in the HDF5 API, please report to the software author(s)." << std::endl;
+			exit(FAST5_HDF5_API_ERROR);
+		}
+		
+		// Delete the link to the original signal data in the new file
+		if(H5Ldelete(new_file_id, (CONCAT3("/", sequence_names[i], "/Raw/Signal")).c_str(), H5P_DEFAULT)){
+			std::cerr << "Unable to delete " << (CONCAT3("/", sequence_names[i], "/Raw/Signal")).c_str() << " from " << new_fast5_file << " Exiting." << std::endl;
+			return 1;
+		}
+		
+		// Open the group where the new signal data will be written
+		if((new_group = H5Gopen(new_file_id, (CONCAT3("/", sequence_names[i], "/Raw")).c_str(), H5P_DEFAULT)) < 0){
+			std::cerr << "Unable to open " << (CONCAT3("/", sequence_names[i], "/Raw")).c_str() << " group in " << new_fast5_file << " Exiting." << std::endl;
+			return 1;
+		}
+		
+		// Create a property list for the dataset
+		if((new_dataset_prop_list = H5Pcreate(H5P_DATASET_CREATE)) < 0){
+			std::cerr << "Unable to create property list for " << new_fast5_file << " Exiting." << std::endl;
+			return 1;
+		}
+		
+		// Set chunk size for the property list since the max size for the space is UNLIMITED
+		if(H5Pset_chunk(new_dataset_prop_list, 1, &read_length)){
+			std::cerr << "Unable to set chunk for property list in " << new_fast5_file << " Exiting." << std::endl;
+			return 1;
+		}
+		
+		// Create the new dataset with the above parameters that we've set
+		if((new_dataset = H5Dcreate2 (new_group, "Signal", H5T_STD_I16LE, space, H5P_DEFAULT, new_dataset_prop_list, H5P_DEFAULT)) < 0){
+			std::cerr << "Unable to create dataset " << (CONCAT3("/", sequence_names[i], "/Raw/Signal")).c_str() << " in " << new_fast5_file << " Exiting." << std::endl;
+			return 1;
+		}
+		
+		// Write the new sequences to the newly created dataset
+		if(H5Dwrite(new_dataset, H5T_STD_I16LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, sequences[i])){
+			std::cerr << "Error writing new sequences to new Fast5 file " << new_fast5_file << " Exiting." << std::endl;
+			return 1;
+		}
+		
+		// Close what was opened in the loop
+		H5Gclose(new_group);
+		H5Pclose(new_dataset_prop_list);
+		H5Dclose(new_dataset);
+		H5Dclose(org_signal_dataset_id);
+		H5Sclose(space);
+	}
+	
+	
+	// Close everything else
+	H5Fclose(org_file_id);
+	H5Fclose(new_file_id);
+	
+	return 0;
+}
+
+#endif
 
 __host__
 void setupPercentageDisplay(std::string title){
