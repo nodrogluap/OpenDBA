@@ -57,15 +57,13 @@ int writeDTWPathMatrix(unsigned char *cpu_stepMatrix, const char *step_filename,
 
 template <typename T>
 __host__
-int writeDTWPath(unsigned char *cpu_pathMatrix, const char *filename, T *gpu_seq, char *cpu_seqname, size_t gpu_seq_len, T *cpu_centroid, size_t cpu_centroid_len, size_t num_columns, size_t num_rows, size_t pathPitch, int flip_seq_order){
-	std::ofstream path(filename);
-	if(!path.is_open()){
-        	std::cerr << "Cannot write to " << filename << std::endl;
-        	return CANNOT_WRITE_DTW_PATH;
+int writeDTWPath(unsigned char *cpu_pathMatrix, std::ofstream *path, T *gpu_seq, char *cpu_seqname, size_t gpu_seq_len, T *cpu_centroid, size_t cpu_centroid_len, size_t num_columns, size_t num_rows, size_t pathPitch, int flip_seq_order, int column_offset = 0, int *stripe_rows = 0){
+	if((*path).tellp() == 0){ // Print the sequence name at the top of the file
+		*path << cpu_seqname << std::endl;
 	}
-	path << cpu_seqname << std::endl;
 
 	T *cpu_seq;
+	// TODO: this is pretty inefficient if running multiple rounds of the same seqs (e.g. during convergence, where we never know if it's the last path that we want to capture), ask CPU seq to be passed in
 	cudaMallocHost(&cpu_seq, sizeof(T)*gpu_seq_len); CUERR("Allocating CPU memory for query seq in DTW path printing");
 	cudaMemcpy(cpu_seq, gpu_seq, sizeof(T)*gpu_seq_len, cudaMemcpyDeviceToHost); CUERR("Copying incoming GPU query to CPU in DTW path printing");
 
@@ -73,21 +71,21 @@ int writeDTWPath(unsigned char *cpu_pathMatrix, const char *filename, T *gpu_seq
 	int moveI[] = { -1, -1, 0, -1, 0 };
 	int moveJ[] = { -1, -1, -1, 0, -1 };
 	int j = num_columns - 1;
-	int i = num_rows - 1;
+	int i = stripe_rows ? *stripe_rows -1 : num_rows - 1;
 	unsigned char move = cpu_pathMatrix[pitchedCoord(j,i,pathPitch)];
 	while (move != NIL && move != NIL_OPEN_RIGHT) {
         	if(flip_seq_order){
-                	path << j << "\t" << cpu_seq[j] << "\t" << i << "\t" << cpu_centroid[i] << "\t" << (move == DIAGONAL ? "DIAG" : (move == RIGHT ? "RIGHT" : (move == UP ? "UP" : (move==OPEN_RIGHT ?  "OPEN_RIGHT" : (move ==NIL ? "NIL" : "?")))))<< std::endl;
+                	*path << column_offset+j << "\t" << cpu_seq[j] << "\t" << i << "\t" << cpu_centroid[i] << "\t" << (move == DIAGONAL ? "DIAG" : (move == RIGHT ? "RIGHT" : (move == UP ? "UP" : (move==OPEN_RIGHT ?  "OPEN_RIGHT" : (move ==NIL ? "NIL" : "?")))))<< std::endl;
         	}
         	else{
-                	path << i << "\t" << cpu_seq[i] << "\t" << j << "\t" << cpu_centroid[j] << "\t" << (move == DIAGONAL ? "DIAG" : (move == RIGHT ? "RIGHT" : (move == UP ? "UP" : (move==OPEN_RIGHT ?  "OPEN_RIGHT" : (move ==NIL ? "NIL" : "?")))))<< std::endl;
+                	*path << i << "\t" << cpu_seq[i] << "\t" << column_offset+j << "\t" << cpu_centroid[j] << "\t" << (move == DIAGONAL ? "DIAG" : (move == RIGHT ? "RIGHT" : (move == UP ? "UP" : (move==OPEN_RIGHT ?  "OPEN_RIGHT" : (move ==NIL ? "NIL" : "?")))))<< std::endl;
         	}
         	i += moveI[move];
         	j += moveJ[move];
         	move = cpu_pathMatrix[pitchedCoord(j,i,pathPitch)];
 	}
-	path.close();
 	cudaFreeHost(cpu_seq); CUERR("Freeing CPU memory for query seq in DTW path printing");
+	if(stripe_rows){*stripe_rows = i+1;}
 	return 0;
 }
 
