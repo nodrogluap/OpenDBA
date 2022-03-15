@@ -132,7 +132,7 @@ TEST_CASE( " Write Fast5 Output " ){
 	
 	SECTION("Wrong Name File Data"){
 		
-		std::cerr << "------TEST 3: failure on bad file name------" << std::endl;
+		std::cerr << "------TEST 3: failure on bad file name ------" << std::endl;
 		
 		short **sequences;
 		char ** sequence_names;
