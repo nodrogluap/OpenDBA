@@ -114,9 +114,11 @@ __host__ void normalizeSequences(T **sequences, size_t num_sequences, size_t *se
         // grid X index is the sequence to be processed, grid Y is the chunk of that sequence to process (each chunk is thread block sized)
         dim3 threadblockDim(CUDA_WARP_WIDTH*CUDA_WARP_WIDTH, 1, 1);
 	int maxSeqLength = 0;
+	size_t seqLengthsAsCPUArray[num_sequences];
+	cudaMemcpy(seqLengthsAsCPUArray, sequence_lengths, sizeof(size_t)*num_sequences, cudaMemcpyDeviceToHost); CUERR("Copying seq lengths from device for normalization kernel grid set up");
 	for(int i = 0; i < num_sequences; i++){
-		if(maxSeqLength < sequence_lengths[i]){
-			maxSeqLength = sequence_lengths[i];
+		if(maxSeqLength < seqLengthsAsCPUArray[i]){
+			maxSeqLength = seqLengthsAsCPUArray[i];
 		}
 	}
         dim3 gridDim(num_sequences, (int) ceilf(maxSeqLength/((double) threadblockDim.x)), 1);
@@ -143,7 +145,8 @@ __host__ void normalizeSequences(T **sequences, size_t num_sequences, size_t *se
 		target_std_dev = sqrt(target_std_dev);
         	rescale_sequences<<<gridDim,threadblockDim,0,stream>>>(sequences, num_sequences, sequence_lengths, sequence_sums, sequence_sum_of_squares, target_mean, target_std_dev, sequence_means, sequence_sigmas); CUERR("Rescaling sequences to target mean and std dev");
 	}
-
+	cudaFree(sequence_sums);  CUERR("Freeing sequence sums array that was used in normalization kernel");
+	cudaFree(sequence_sum_of_squares);  CUERR("Freeing sequence sums of squares array that was used in normalization kernel");
 }
 
 template<typename T>
@@ -153,7 +156,15 @@ __host__ void normalizeSequences(T **gpu_sequences, size_t num_sequences, size_t
 
 template<typename T>
 __host__ void normalizeSequence(T *gpu_sequence, size_t seqLength, cudaStream_t stream){
-	normalizeSequences<T>(&gpu_sequence, 1, &seqLength, -1, stream);
+	size_t *seqLengthAsGPUArray;
+	cudaMalloc(&seqLengthAsGPUArray, sizeof(size_t));  CUERR("Allocating single size_t array for normalization kernel");
+	cudaMemcpy(seqLengthAsGPUArray, &seqLength, sizeof(size_t), cudaMemcpyHostToDevice); CUERR("Copying single size_t seq length to device for normalization kernel");
+	T **seqAsGPUPointerArray;
+	cudaMalloc(&seqAsGPUPointerArray, sizeof(T **));  CUERR("Allocating single sequence pointer array for normalization kernel");
+	cudaMemcpy(seqAsGPUPointerArray, &gpu_sequence, sizeof(T *), cudaMemcpyHostToDevice); CUERR("Copying single seq pointer across device for normalization kernel");
+	normalizeSequences<T>(seqAsGPUPointerArray, 1, seqLengthAsGPUArray, -1, stream);
+	cudaFree(seqLengthAsGPUArray);  CUERR("Freeing single size_t array that was used in normalization kernel");
+	cudaFree(seqAsGPUPointerArray);  CUERR("Freeing single sequence pointer array that was used in normalization kernel");
 }
 
 #endif
