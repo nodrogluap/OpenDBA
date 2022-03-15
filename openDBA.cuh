@@ -34,7 +34,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 		writeSequences(sequences, sequence_lengths, sequence_names, actual_num_series, CONCAT2(output_prefix, ".seqs.txt").c_str());
 	}
 #endif
-	else{ actual_num_series = readSequenceTextFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
+	else{ actual_num_series = readSequenceTextFiles<T>(series_file_names, num_series, &sequences, &sequence_names, &sequence_lengths); }
 
 	// Sanity check
 	if(actual_num_series < 2){
@@ -53,7 +53,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 			readSequenceBinaryFiles<T>(&seqprefix_file_name, 1, &seqprefix, &seqprefix_length);
 		}
 		else{
-			readSequenceTextFiles<T>(&seqprefix_file_name, 1, &seqprefix, &seqprefix_length);
+			readSequenceTextFiles<T>(&seqprefix_file_name, 1, &seqprefix, &sequence_names, &seqprefix_length);
 		}
 		if(*seqprefix_length == 0){
 			std::cerr << "Cannot read prefix " << (read_mode == BINARY_READ_MODE ? "binary" : "text") << 
