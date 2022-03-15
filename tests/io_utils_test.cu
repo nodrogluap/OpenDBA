@@ -58,7 +58,7 @@ TEST_CASE( " Write Fast5 Output " ){
 	
 	SECTION("Good File Data"){
 		
-		std::cerr << "------TEST 1------" << std::endl;
+		std::cerr << "------TEST 1: successful raw signal replacement with same length data ------" << std::endl;
 		
 		short **sequences;
 		char ** sequence_names;
@@ -105,7 +105,7 @@ TEST_CASE( " Write Fast5 Output " ){
 	
 	SECTION("Wrong Size File Data"){
 		
-		std::cerr << "------TEST 2------" << std::endl;
+		std::cerr << "------TEST 2: enforce same length on FAST5 output ------" << std::endl;
 		
 		short **sequences;
 		char ** sequence_names;
@@ -132,7 +132,7 @@ TEST_CASE( " Write Fast5 Output " ){
 	
 	SECTION("Wrong Name File Data"){
 		
-		std::cerr << "------TEST 3------" << std::endl;
+		std::cerr << "------TEST 3: failure on bad file name------" << std::endl;
 		
 		short **sequences;
 		char ** sequence_names;
