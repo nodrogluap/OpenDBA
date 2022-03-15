@@ -125,6 +125,10 @@ openDBA fast5 float open_end output_prefix 4 direct_rna_leader_float.txt 13 ont_
 
 Note that the K-means clustering ignores singleton branches in the dendrogram, so reduce the odds of overclustering due to errant data you did not expect. This entails that the actual number "K" in K-means may be greater than the K specified on the command line, to accomodate these singletons.  The actual K used is printed in the standard error output to note the final value of K used.
 
+## Writing FAST5 data
+
+Given a *single* multi-FAST5 OpenDBA will now write the cluster sequence averages (including singletons verbatim) to ```outputprefix.avg.fast5```. This file can then be used as input for basecalling (has been tested with ONT's guppy). Particularly for direct RNA this can be useful, as single read basecall quality is still fairly poor. Averaging multiple sequences at the raw signal level can increase the accuracy of the basecalling as a kind of denoising step. For the moment, of you have multiple FAST5 files you'd like to average at the raw signal level, this must be done as a preprocessing step before you use OpenDBA. 
+
 ## Common Problems &amp; Solutions
 
 If the code does not compile, you may have encountered a bug in CentOS 7's glibc implementation. The solution can be found [here](https://github.com/nodrogluap/OpenDBA/issues/9).
