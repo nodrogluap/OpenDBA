@@ -410,9 +410,10 @@ int readSequenceFAST5Files(char **filenames, int num_files, T ***sequences, char
 #endif
 
 template<typename T>
-int readSequenceTextFiles(char **filenames, int num_files, T ***sequences, size_t **sequence_lengths){
-        cudaMallocManaged(sequences, sizeof(T *)*num_files); CUERR("Allocating CPU memory for sequence pointers");
-        cudaMallocManaged(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating CPU memory for sequence lengths");
+int readSequenceTextFiles(char **filenames, int num_files, T ***sequences, char ***sequence_names, size_t **sequence_lengths){
+        cudaMallocManaged(sequences, sizeof(T *)*num_files); CUERR("Allocating managed memory for sequence pointers");
+        cudaMallocHost(sequence_names, sizeof(char *)*num_files); CUERR("Allocating host memory for sequence names");
+        cudaMallocManaged(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating managed memory for sequence lengths");
 
         int dotsPrinted = 0;
 	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? " text data file" : " text data files") << ", total sequence count " << num_files << std::endl;
@@ -436,6 +437,9 @@ int readSequenceTextFiles(char **filenames, int num_files, T ***sequences, size_
 		else{
 			actual_count++;
 		}
+
+		cudaMallocHost(*sequence_names+i, sizeof(char)*(strlen(filenames[i])+1)); CUERR("Allocating managed memory for a sequence name");
+		strcpy((*sequence_names)[i], filenames[i]);
         }
 	if(dotsPrinted < 100){while(dotsPrinted++ < 99){std::cerr << ".";} std::cerr << "|";}
 	std::cerr << std::endl;
