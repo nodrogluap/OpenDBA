@@ -23,7 +23,7 @@ endif
 all: $(PROGNAME)
 
 clean:
-	rm -f openDBA.o multithreading.o submodules/hclust-cpp/fastcluster.o vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so $(PROGNAME)
+	rm -f openDBA.o multithreading.o submodules/hclust-cpp/fastcluster.o vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so tests/openDBA_test.o tests/io_utils_test $(PROGNAME)
 
 # Following two targets are small external libraries with more less restrictive licenses (see headers for license info)
 multithreading.o: multithreading.cpp
@@ -38,7 +38,7 @@ openDBA.o: openDBA.cu openDBA.cuh clustering.cuh segmentation.hpp cpu_utils.hpp 
 plugins: vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so
 
 tests/openDBA_test.o: tests/openDBA_test.cu openDBA.cuh segmentation.hpp cpu_utils.hpp gpu_utils.hpp io_utils.hpp exit_codes.hpp read_mode_codes.h dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
-	nvcc -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
+	nvcc -DCUB_IGNORE_DEPRECATED_CPP_DIALECT -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
 
 tests/openDBA_test: tests/openDBA_test.cu tests/openDBA_test.o multithreading.o submodules/hclust-cpp/fastcluster.o
 	nvcc $(NVCC_FLAGS) --compiler-options "-fPIC -no-pie" tests/openDBA_test.o multithreading.o submodules/hclust-cpp/fastcluster.o -o tests/openDBA_test
