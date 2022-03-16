@@ -11,6 +11,26 @@
 #define ACCUMULATOR_PRIMITIVE_TYPE double
 #endif
 
+// There is no native support for atomicAdd() of 16-bit short integers in CUDA, so roll our own.
+// Taken from NVIDIA developer forum post Sylvain Collange
+static inline __device__ short atomicAdd(short* address, short val){
+    	unsigned int *base_address = (unsigned int *)((size_t)address & ~2);
+    	val = val ^ 0x8000; // 2's complement to biased
+    	unsigned int long_val = ((size_t)address & 2) ? ((unsigned int)val << 16) : (unsigned short)val;
+    	unsigned int long_old = atomicAdd(base_address, long_val);
+
+    	if((size_t)address & 2) {
+        	return (short)((long_old >> 16) ^ 0x8000);  // biased to 2's complement
+    	} 
+    	else{
+        	unsigned int overflow = ((long_old & 0xffff) + long_val) & 0xffff0000;
+        	if (overflow){
+            		atomicSub(base_address, 1);
+		}
+        return (short)((long_old & 0xffff) ^ 0x8000);  // biased to 2's complement
+    }
+}
+
 template<typename T>
 __global__ void calc_sums(T **sequences, size_t num_sequences, size_t *sequence_lengths, T *sequence_sums){
         __shared__ T warp_sums[CUDA_WARP_WIDTH];

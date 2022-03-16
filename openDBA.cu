@@ -30,9 +30,9 @@ int main(int argc, char **argv){
 		std::cout << "Usage: " << argv[0] << " <binary|text|tsv> "; 
 #endif
 #if DOUBLE_UNSUPPORTED == 1
-		std::cout << "<int|uint|ulong|float> " <<
+		std::cout << "<short|int|uint|ulong|float> " <<
 #else
-		std::cout << "<int|uint|ulong|float|double> " <<
+		std::cout << "<short|int|uint|ulong|float|double> " <<
 #endif
 		          "<global|open_start|open_end|open> <output files prefix> <minimum unimodal segment length, or 0 for no segmentation> <prefix sequence to remove|/dev/null> <clustering threshold> <series.tsv|<series1> <series2> [series3...]>\n";
 		exit(1);
@@ -106,6 +106,9 @@ int main(int argc, char **argv){
 		setupAndRun<double>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
 	}
 #endif
+	else if(!strcmp(argv[2], "short")){
+		setupAndRun<short>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
+	}
 	else{
 		std::cerr << "Second argument (" << argv[2] << ") was not one of the accepted numerical representations: 'int', 'uint', 'ulong', 'float' or 'double'" << std::endl;
 		exit(1);
