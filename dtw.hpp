@@ -34,6 +34,7 @@ __device__ T* shared_memory_proxy() {
 
 /**
  * Compute the distance between a given pair of sequences along every White-Neely step pattern option, for the given vertical swath of the cost matrix.
+ * Here "First" sequence is on the Y axis, "Second" sequence is on the X axis with respect to the DTW's up, right and diagonal move options.
  */
 template<typename T>
 __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_input_length, const T *second_seq_input, const size_t second_seq_input_length, const size_t first_seq_index, 
