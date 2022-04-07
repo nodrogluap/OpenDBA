@@ -107,7 +107,8 @@ int main(int argc, char **argv){
 	}
 #endif
 	else if(!strcmp(argv[2], "short")){
-		setupAndRun<short>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
+		// Short is not properly supported in the hardware nor by z-normalization, we will convert to float  (last arg=1)
+		setupAndRun<float>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist, 1);
 	}
 	else{
 		std::cerr << "Second argument (" << argv[2] << ") was not one of the accepted numerical representations: 'int', 'uint', 'ulong', 'float' or 'double'" << std::endl;

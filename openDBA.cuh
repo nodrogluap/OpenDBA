@@ -12,11 +12,7 @@
 
 template<typename T>
 void
-setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length, int norm_sequences, double cdist);
-
-template<typename T>
-void
-setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length, int norm_sequences, double cdist){
+setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length, int norm_sequences, double cdist, bool is_short=false){
 	size_t *sequence_lengths = 0;
 	T **segmented_sequences = 0;
 	size_t *segmented_seq_lengths = 0;
@@ -25,7 +21,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	int actual_num_series = 0; // excludes failed file reading
 
 	// Step 0. Read in data.
-	if(read_mode == BINARY_READ_MODE){ actual_num_series = readSequenceBinaryFiles<T>(series_file_names, num_series, &sequences, &sequence_lengths); }
+	if(read_mode == BINARY_READ_MODE){ actual_num_series = readSequenceBinaryFiles<T>(series_file_names, num_series, &sequences, &sequence_names, &sequence_lengths, is_short); }
 	// In the following two the sequence names are from inside the file, not the file names themselves
 	else if(read_mode == TSV_READ_MODE){ actual_num_series = readSequenceTSVFiles<T>(series_file_names, num_series, &sequences, &sequence_names, &sequence_lengths); }
 #if HDF5_SUPPORTED == 1
@@ -50,7 +46,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 		T **seqprefix = 0;
 		size_t *seqprefix_length = 0;
 		if(read_mode == BINARY_READ_MODE){
-			readSequenceBinaryFiles<T>(&seqprefix_file_name, 1, &seqprefix, &seqprefix_length);
+			readSequenceBinaryFiles<T>(&seqprefix_file_name, 1, &seqprefix, &sequence_names, &seqprefix_length);
 		}
 		else{
 			readSequenceTextFiles<T>(&seqprefix_file_name, 1, &seqprefix, &sequence_names, &seqprefix_length);

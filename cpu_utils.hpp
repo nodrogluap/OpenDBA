@@ -53,7 +53,7 @@ short* templateToShort(T* data, size_t data_length){
 
 template <typename T>
 int
-read_binary_data(const char *binary_file_name, T **output_vals, size_t *num_output_vals){
+read_binary_data(const char *binary_file_name, T **output_vals, size_t *num_output_vals, bool is_short=false){
 
   // See how big the file is, so we can allocate the appropriate buffer
   std::ifstream ifs(binary_file_name, std::ios::binary);
@@ -61,17 +61,22 @@ read_binary_data(const char *binary_file_name, T **output_vals, size_t *num_outp
   if(ifs){
     ifs.seekg(0, ifs.end);
     n = ifs.tellg();
-    *num_output_vals = n/sizeof(T);
+    *num_output_vals = n/(is_short?2:sizeof(T)); // special case where shorts will be converted to floats for Z-normalized computation
   }
   else{
     return 1;
   }
 
   T *out = 0;
-  cudaMallocManaged(&out, sizeof(T)*n); CUERR("Cannot allocate CPU memory for reading sequence from file");
+  cudaMallocManaged(&out, sizeof(T)*(*num_output_vals)); CUERR("Cannot allocate CPU memory for reading sequence from file");
 
   ifs.seekg(0, std::ios::beg);
   ifs.read((char *) out, n);
+  if(is_short){ // in place expansion from short -> float
+	  for(std::streamoff i = (std::streamoff) n/sizeof(short); i >= 0; i--){
+		out[i] = (float) *(((short*) out)+i);
+	  }
+  }
 
   // Only set the output if all the data was succesfully read in.
   *output_vals = out;
@@ -411,9 +416,9 @@ int readSequenceFAST5Files(char **filenames, int num_files, T ***sequences, char
 
 template<typename T>
 int readSequenceTextFiles(char **filenames, int num_files, T ***sequences, char ***sequence_names, size_t **sequence_lengths){
-        cudaMallocManaged(sequences, sizeof(T *)*num_files); CUERR("Allocating managed memory for sequence pointers");
-        cudaMallocHost(sequence_names, sizeof(char *)*num_files); CUERR("Allocating host memory for sequence names");
-        cudaMallocManaged(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating managed memory for sequence lengths");
+        cudaMallocManaged(sequences, sizeof(T *)*num_files); CUERR("Allocating managed memory for sequence pointers from text files");
+        cudaMallocHost(sequence_names, sizeof(char *)*num_files); CUERR("Allocating host memory for sequence names from text files");
+        cudaMallocManaged(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating managed memory for sequence lengths from text files");
 
         int dotsPrinted = 0;
 	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? " text data file" : " text data files") << ", total sequence count " << num_files << std::endl;
@@ -432,13 +437,13 @@ int readSequenceTextFiles(char **filenames, int num_files, T ***sequences, char 
                 }
 
                 if(read_text_data<T>(filenames[i], (*sequences) + actual_count, (*sequence_lengths) + actual_count)){
-    			std::cerr << "Error reading in file " << filenames[i] << ", skipping" << std::endl;
+    			std::cerr << "Error reading in text file " << filenames[i] << ", skipping" << std::endl;
 		}
 		else{
 			actual_count++;
 		}
 
-		cudaMallocHost(*sequence_names+i, sizeof(char)*(strlen(filenames[i])+1)); CUERR("Allocating managed memory for a sequence name");
+		cudaMallocHost(*sequence_names+i, sizeof(char)*(strlen(filenames[i])+1)); CUERR("Allocating managed memory for a sequence name from text file");
 		strcpy((*sequence_names)[i], filenames[i]);
         }
 	if(dotsPrinted < 100){while(dotsPrinted++ < 99){std::cerr << ".";} std::cerr << "|";}
@@ -447,9 +452,10 @@ int readSequenceTextFiles(char **filenames, int num_files, T ***sequences, char 
 }
 
 template<typename T>
-int readSequenceBinaryFiles(char **filenames, int num_files, T ***sequences, size_t **sequence_lengths){
-        cudaMallocManaged(sequences, sizeof(T *)*num_files); CUERR("Allocating CPU memory for sequence pointers");
-        cudaMallocManaged(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating CPU memory for sequence lengths");
+int readSequenceBinaryFiles(char **filenames, int num_files, T ***sequences, char ***sequence_names, size_t **sequence_lengths, bool is_short=false){
+        cudaMallocManaged(sequences, sizeof(T *)*num_files); CUERR("Allocating CPU memory for sequence pointers from binary files");
+	cudaMallocHost(sequence_names, sizeof(char *)*num_files); CUERR("Allocating host memory for sequence names from binary files");
+        cudaMallocManaged(sequence_lengths, sizeof(size_t)*num_files); CUERR("Allocating CPU memory for sequence lengths from binary files");
 
         int dotsPrinted = 0;
 	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? " binary data file" : " binary data files") << ", total sequence count " << num_files << std::endl;
@@ -467,12 +473,14 @@ int readSequenceBinaryFiles(char **filenames, int num_files, T ***sequences, siz
                         std::cerr << "\b" << spinner[i%4];
                 }
 
-                if(read_binary_data<T>(filenames[i], (*sequences) + actual_count, (*sequence_lengths) + actual_count)){
-    			std::cerr << "Error reading in file " << filenames[i] << ", skipping" << std::endl;
+                if(read_binary_data<T>(filenames[i], (*sequences) + actual_count, (*sequence_lengths) + actual_count, is_short)){
+    			std::cerr << "Error reading in binary file " << filenames[i] << ", skipping" << std::endl;
 		}
 		else{
 			actual_count++;
 		}
+		cudaMallocHost(*sequence_names+i, sizeof(char)*(strlen(filenames[i])+1)); CUERR("Allocating managed memory for a sequence name from text file");
+                strcpy((*sequence_names)[i], filenames[i]);
         }
 	if(dotsPrinted < 100){while(dotsPrinted++ < 99){std::cerr << ".";} std::cerr << "|";}
 	std::cerr << std::endl;
