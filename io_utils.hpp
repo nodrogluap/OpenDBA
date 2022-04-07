@@ -77,21 +77,27 @@ int writeDTWPath(unsigned char *cpu_pathMatrix, std::ofstream *path, T *gpu_seq,
 	cudaMemcpy(cpu_seq, gpu_seq, sizeof(T)*gpu_seq_len, cudaMemcpyDeviceToHost); CUERR("Copying incoming GPU query to CPU in DTW path printing");
 
 	// moveI and moveJ are defined device-side in dtw.hpp, but we are host side so we need to replicate
-	int moveI[] = { -1, -1, 0, -1, 0 };
-	int moveJ[] = { -1, -1, -1, 0, -1 };
+	// NIL sentinel value is for the start of the DTW alignment, the stop condition for backtracking (ergo has no corresponding moveI or moveJ)
+	int moveI[] = { -1, -1, 0, -1, 0, 0, 0 };
+	int moveJ[] = { -1, -1, -1, 0, -1, -1, -1 };
 	int j = num_columns - 1;
 	int i = stripe_rows ? *stripe_rows -1 : num_rows - 1;
 	unsigned char move = cpu_pathMatrix[pitchedCoord(j,i,pathPitch)];
-	while (move != NIL && move != NIL_OPEN_RIGHT) {
+	while (move != NIL && move != NIL_OPEN_RIGHT && (column_offset == 0 || i >= 0 && j >= 0)) { // special stop condition if partially printing the matrix
         	if(flip_seq_order){
-                	*path << column_offset+j << "\t" << cpu_seq[j] << "\t" << i << "\t" << cpu_centroid[i] << "\t" << (move == DIAGONAL ? "DIAG" : (move == RIGHT ? "RIGHT" : (move == UP ? "UP" : (move==OPEN_RIGHT ?  "OPEN_RIGHT" : (move ==NIL ? "NIL" : "?")))))<< std::endl;
+			// Technically NIL and NIL_OPEN_RIGHT should never happen in here, but if they do we know there's a bad bug :-)
+                	*path << column_offset+j << "\t" << cpu_seq[j+column_offset] << "\t" << i << "\t" << cpu_centroid[i] << "\t" << (move == DIAGONAL ? "DIAG" : (move == RIGHT ? "RIGHT" : (move == UP ? "UP" : (move == OPEN_RIGHT ? "OPEN_RIGHT" : (move == NIL ? "NIL" : (move == NIL_OPEN_RIGHT ? "NIL_OPEN_RIGHT" : "?")))))) << std::endl;
         	}
         	else{
-                	*path << i << "\t" << cpu_seq[i] << "\t" << column_offset+j << "\t" << cpu_centroid[j] << "\t" << (move == DIAGONAL ? "DIAG" : (move == RIGHT ? "RIGHT" : (move == UP ? "UP" : (move==OPEN_RIGHT ?  "OPEN_RIGHT" : (move ==NIL ? "NIL" : "?")))))<< std::endl;
+                	*path << i << "\t" << cpu_seq[i] << "\t" << column_offset+j << "\t" << cpu_centroid[j+column_offset] << "\t" << (move == DIAGONAL ? "DIAG" : (move == RIGHT ? "RIGHT" : (move == UP ? "UP" : (move == OPEN_RIGHT ? "OPEN_RIGHT" : (move == NIL ? "NIL" : (move == NIL_OPEN_RIGHT ? "NIL_OPEN_RIGHT" : "?")))))) << std::endl;
         	}
         	i += moveI[move];
         	j += moveJ[move];
         	move = cpu_pathMatrix[pitchedCoord(j,i,pathPitch)];
+	}
+	// Print the anchor
+	if(column_offset == 0){
+		*path << i << "\t" << cpu_seq[i] << "\t" << column_offset+j << "\t" << cpu_centroid[j] << "\t" << (move == NIL ? "NIL" : (move == NIL_OPEN_RIGHT ? "NIL_OPEN_RIGHT" : "?")) << std::endl;
 	}
 	cudaFreeHost(cpu_seq); CUERR("Freeing CPU memory for query seq in DTW path printing");
 	if(stripe_rows){*stripe_rows = i+1;}
