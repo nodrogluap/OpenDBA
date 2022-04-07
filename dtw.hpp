@@ -57,7 +57,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 
 	// Point to the correct spot in global memory where the costs are being stored.
 	dtwCostSoFar = &dtwCostSoFar[first_seq_length*blockIdx.x];
-	newDtwCostSoFar = &newDtwCostSoFar[first_seq_length*blockIdx.x];
+	if(newDtwCostSoFar != 0) newDtwCostSoFar = &newDtwCostSoFar[first_seq_length*blockIdx.x];
 
 	// Each thread will be using the same second sequence value throughout the rest of the kernel, so store it as a local variable for efficiency.
 	const T second_seq_thread_val = offset_within_second_seq+threadIdx.x >= second_seq_length ? 0 : second_seq[offset_within_second_seq+threadIdx.x];
@@ -75,7 +75,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 		// Check if the search has already been abrogated by a previous kernel call (further left in the DTW matrix calculation) 
 		if(dtwCostSoFar[0] == numeric_limits<T>::max()){
 			if(pathMatrix != 0 && offset_within_second_seq+threadIdx.x < second_seq_length){
-                                pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,first_seq_length-1,pathMemPitch)] = OPEN_RIGHT;
+                                pathMatrix[pitchedCoord((newDtwCostSoFar ? offset_within_second_seq : 0)+threadIdx.x,first_seq_length-1,pathMemPitch)] = OPEN_RIGHT;
                         }
 			return;
 		}
@@ -105,15 +105,15 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 		// Top row value is the lowest for this column, only need to populate the open_right move for correct backtracking and cumulative cost calcs
 		if(dtwCostSoFar[first_seq_length-1] == warp_minvals[0]){
 			if(pathMatrix != 0 && offset_within_second_seq+threadIdx.x < second_seq_length){
-				pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,first_seq_length-1,pathMemPitch)] = OPEN_RIGHT;
+				pathMatrix[pitchedCoord((newDtwCostSoFar ? offset_within_second_seq : 0)+threadIdx.x,first_seq_length-1,pathMemPitch)] = OPEN_RIGHT;
 			}
 			// Make sure bottom row's DTW cost so far is set to the max possible. 
 			// This is how we indicate that we've decided to abrogated the rest of the search.
-			if(threadIdx.x == 0){
+			if(threadIdx.x == 0 && newDtwCostSoFar != 0){
 				newDtwCostSoFar[0] = numeric_limits<T>::max();
 			}
-			// As we've made a final determination for the cost, record it to GPU memory
-        		if(dtwPairwiseDistances != 0 && threadIdx.x == 0){
+			// As we've made a final determination for the cost, record it to GPU memory if we've been given a spot for it.
+        		if(dtwPairwiseDistances != 0 && threadIdx.x == 0 && newDtwCostSoFar != 0){
 				// If the alignment has open right end, the medoid calculations will always be biased towards the shortest sequences since the open state is "free",
 				// which is troublesome for retaining consensus features in clusters.  To remove this bias, we will normalize the distance matrix to be relative to the length of the
                         	// shorter sequence with the assumption on average that the shorter sequence is the one generating "free" 
@@ -140,7 +140,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 		else{
 			costs[0] = dtwCostSoFar[0];
 			if(pathMatrix != 0){
-				pathMatrix[pitchedCoord(offset_within_second_seq,0,pathMemPitch)] = use_open_start ? OPEN_RIGHT : RIGHT;
+				pathMatrix[pitchedCoord((newDtwCostSoFar ? offset_within_second_seq : 0),0,pathMemPitch)] = use_open_start ? OPEN_RIGHT : RIGHT;
 			}
 		}
 		costs[0] += use_open_start ? 0 : (first_seq_start_val-second_seq_thread_val)*(first_seq_start_val-second_seq_thread_val);
@@ -149,10 +149,10 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 			T diff = use_open_start ? 0 : first_seq_start_val-second_seq[offset_within_second_seq+col];
 			costs[col+blockDim.x*(col%3)] = costs[(col-1)+blockDim.x*((col-1)%3)]+diff*diff;
 			if(pathMatrix != 0){
-				pathMatrix[pitchedCoord(offset_within_second_seq+col,0,pathMemPitch)] = use_open_start ? OPEN_RIGHT : RIGHT;
+				pathMatrix[pitchedCoord((newDtwCostSoFar ? offset_within_second_seq : 0)+col,0,pathMemPitch)] = use_open_start ? OPEN_RIGHT : RIGHT;
 			}
 		}
-		newDtwCostSoFar[0] = costs[(col-1)];
+		if(newDtwCostSoFar != 0) newDtwCostSoFar[0] = costs[(col-1)];
 	}
 	
 	int i; // Indicates the ordinal of the diagonal of the wave front cost values being calculated
@@ -202,24 +202,26 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 			if(diag_cost > up_cost){
 				if(up_cost > right_cost){
 					costs[threadIdx.x+blockDim.x*(i%3)] = right_cost;
-					if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = used_open_right_end_cost ? OPEN_RIGHT : RIGHT;}
+					// Implicitly, if we aren't tracking the new cost so far, we assume we're doing a striped backtracing of the path so no path offset
+					// is required as it's being built and printed/used one stripe at a time.
+					if(pathMatrix != 0){pathMatrix[pitchedCoord((newDtwCostSoFar ? offset_within_second_seq : 0)+threadIdx.x,i-threadIdx.x,pathMemPitch)] = used_open_right_end_cost ? OPEN_RIGHT : RIGHT;}
 					// move = 'R';
 				}
 				else{
 					costs[threadIdx.x+blockDim.x*(i%3)] = up_cost;
-					if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = UP;}
+					if(pathMatrix != 0){pathMatrix[pitchedCoord((newDtwCostSoFar ? offset_within_second_seq : 0)+threadIdx.x,i-threadIdx.x,pathMemPitch)] = UP;}
 					// move = 'U';
 				}
 			}
 			else{
 				if(diag_cost > right_cost){
 					costs[threadIdx.x+blockDim.x*(i%3)] = right_cost;
-                                        if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = used_open_right_end_cost ? OPEN_RIGHT : RIGHT;}
+                                        if(pathMatrix != 0){pathMatrix[pitchedCoord((newDtwCostSoFar ? offset_within_second_seq : 0)+threadIdx.x,i-threadIdx.x,pathMemPitch)] = used_open_right_end_cost ? OPEN_RIGHT : RIGHT;}
 					// move = 'R';
 				}
 				else{
 					costs[threadIdx.x+blockDim.x*(i%3)] = diag_cost;
-					if(pathMatrix != 0){pathMatrix[pitchedCoord(offset_within_second_seq+threadIdx.x,i-threadIdx.x,pathMemPitch)] = DIAGONAL;}
+					if(pathMatrix != 0){pathMatrix[pitchedCoord((newDtwCostSoFar ? offset_within_second_seq : 0)+threadIdx.x,i-threadIdx.x,pathMemPitch)] = DIAGONAL;}
 					// move = 'D';
 				}
 			}
@@ -227,7 +229,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 			// if(first_seq_index == 1) printf("1, %i, %hi, %f, %f, %f, %f, %c\n", i, threadIdx.x, up_cost, right_cost, diag_cost, diff*diff, move);
 			// Right edge is a special case as we need to store back out intermediate result to global mem
 			// for the use of the next kernel call with a larger offset_within_second_seq.
-			if(threadIdx.x == blockDim.x-1 || offset_within_second_seq+threadIdx.x == second_seq_length - 1){
+			if(newDtwCostSoFar != 0 && (threadIdx.x == blockDim.x-1 || offset_within_second_seq+threadIdx.x == second_seq_length - 1)){
 				newDtwCostSoFar[i-threadIdx.x] = costs[threadIdx.x+blockDim.x*(i%3)];
 			}
 		}
@@ -238,7 +240,7 @@ __global__ void DTWDistance(const T *first_seq_input, const size_t first_seq_inp
 	// If this is the end of the second sequence, we now know the total cost of the alignment and can populate 
 	// global var dtwPairwiseDistances. This is more efficient than doing a round trip on the PCI bus to the CPU for the same purpose.
 	if(offset_within_second_seq+blockDim.x >= second_seq_length){
-		if(dtwPairwiseDistances != 0 && threadIdx.x == 0){
+		if(dtwPairwiseDistances != 0 && threadIdx.x == 0 && newDtwCostSoFar != 0){
 			// 1D index for row into distances upper left pairs triangle is the total size of the triangle, minus all those that haven't been processed yet. 
 			int result_index = ARITH_SERIES_SUM(num_sequences-1)-ARITH_SERIES_SUM(num_sequences-first_seq_index-1)+blockIdx.x;
 
