@@ -33,6 +33,13 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
  	cudaGetDeviceCount(&deviceCount); CUERR("Getting GPU device count in medoid approximation method");
 
 	unsigned int *maxThreads = getMaxThreadsPerDevice(deviceCount); // from cuda_utils.hpp
+	// Pick the lowest common denominator 
+       	dim3 threadblockDim(maxThreads[0], 1, 1);
+	for(int i = 1; i < deviceCount; i++){
+		if(maxThreads[i] < threadblockDim.x){
+			threadblockDim.x = maxThreads[i];
+		}
+	}
 
 	T **gpu_dtwPairwiseDistances = 0;
 	cudaMallocHost(&gpu_dtwPairwiseDistances,sizeof(T *)*deviceCount);  CUERR("Allocating CPU memory for GPU DTW pairwise distances' pointers");
@@ -51,53 +58,99 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 	// To save on space while still calculating all possible DTW paths, we process all DTWs for one sequence at the same time.
         // So allocate space for the dtwCost to get to each point on the border between grid vertical swaths of the total cost matrix.
 	int dotsPrinted = 0;
-	for(size_t seq_index = 0; seq_index < num_sequences-1; seq_index++){
-		int currDevice = seq_index%deviceCount;
-		cudaSetDevice(currDevice);
-        	dim3 threadblockDim(maxThreads[currDevice], 1, 1);
-        	dim3 gridDim((num_sequences-seq_index-1), 1, 1);
-		size_t current_seq_length = sequence_lengths[seq_index];
-		// We are allocating each time rather than just once at the start because if the sequences have a large
-                // range of lengths and we sort them from shortest to longest we will be allocating the minimum amount of
-		// memory necessary.
-		size_t dtwCostSoFarSize = sizeof(T)*current_seq_length*gridDim.x;
-		size_t freeGPUMem;
-		size_t totalGPUMem;
-		cudaMemGetInfo(&freeGPUMem, &totalGPUMem);	
-		while(freeGPUMem < dtwCostSoFarSize){
-			//std::this_thread::sleep_for(std::chrono::seconds(1));
-			#ifdef _WIN32
-				Sleep(1000);
-			#else
-				usleep(1000000);
-			#endif
-			std::cerr << "Waiting for memory to be freed before launching " << std::endl;
-			cudaMemGetInfo(&freeGPUMem, &totalGPUMem);
-		}
-		dotsPrinted = updatePercentageComplete(seq_index+1, num_sequences-1, dotsPrinted);
-		T *dtwCostSoFar = 0;
-		T *newDtwCostSoFar = 0;
-		cudaMallocManaged(&dtwCostSoFar, dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values");
-		cudaMallocManaged(&newDtwCostSoFar, dtwCostSoFarSize); CUERR("Allocating GPU memory for new DTW pairwise distance intermediate values");
+	for(size_t seq_index = 0; seq_index < num_sequences-1; seq_index+=deviceCount){
+		// An issue can pop up with extremely long sequences that we are typically launching a kernel every 256 or 1024 sequence elements, and an async copy.
+		// So, a stream can get 900+ kernel launches queued up in it once it becomes 450K elements long. The kernel launch queue for a stream is 
+		// not specifically defined, but with near 1000 launches queued up, another kernel launch will sit synchronously and wait for something to come off the queue.
+		// TODO: To avoid this bottleneck, we should distribute the launches into many queues. Each kernel launched can only run on one streaming multi-processor
+		// at a time and a V100 card for example has 80 of these. If we provide many streams and launch into all of them we utilize the GPU cards more effectively
+		// at the cost of only 2*Y where Y is the length of the vertical sequence in the DTW cost matrix.  We can do this because we don't store the full cost matrix, 
+		// only the leading edge between kernel calls calculating a 256 or 1024 column wide swath of it.
+		//
+		// The most effective throughput technique is a breadth first distrbution of the sequence pair comparisons across available devices.
+		// Then you can start using multiple streams per device. 
+		size_t dtwCostSoFarSize[deviceCount];
+		T *dtwCostSoFar[deviceCount];
+		T *newDtwCostSoFar[deviceCount];
+		cudaStream_t seq_stream[deviceCount]; 
+		for(int currDevice = 0; currDevice < deviceCount && seq_index + currDevice < num_sequences-1; currDevice++){
+			cudaSetDevice(currDevice);
+			size_t current_seq_length = sequence_lengths[seq_index+currDevice];
+			// We are allocating each time rather than just once at the start because if the sequences have a large
+                	// range of lengths and we sort them from shortest to longest we will be allocating the minimum amount of
+			// memory necessary.
+        		dim3 gridDim((num_sequences-seq_index-currDevice-1), 1, 1);
+			dtwCostSoFarSize[currDevice] = sizeof(T)*current_seq_length*gridDim.x;
+			size_t freeGPUMem;
+			size_t totalGPUMem;
+			cudaMemGetInfo(&freeGPUMem, &totalGPUMem);	
+			while(freeGPUMem < dtwCostSoFarSize[currDevice]){
+				//std::this_thread::sleep_for(std::chrono::seconds(1));
+				#ifdef _WIN32
+					Sleep(1000);
+				#else
+					usleep(1000000);
+				#endif
+				// This is a super tight loop for the all-vs-all, not willing to move to managed memory just now.
+				std::cerr << "Waiting for memory to be freed before launching " << std::endl;
+				cudaMemGetInfo(&freeGPUMem, &totalGPUMem);
+			}
+			cudaMallocManaged(&dtwCostSoFar[currDevice], dtwCostSoFarSize[currDevice]);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values");
+			cudaMallocManaged(&newDtwCostSoFar[currDevice], dtwCostSoFarSize[currDevice]); CUERR("Allocating GPU memory for new DTW pairwise distance intermediate values");
 
-		// Make calls to DTWDistance serial within each seq, but allow multiple seqs on the GPU at once.
-		cudaStream_t seq_stream; 
-		cudaStreamCreateWithPriority(&seq_stream, cudaStreamNonBlocking, descendingPriority);
-		if(descendingPriority < priority_low){
-			descendingPriority++;
-		}
+			// Make calls to DTWDistance serial within each seq, but allow multiple seqs on the GPU at once.
+			cudaStreamCreateWithPriority(&seq_stream[currDevice], cudaStreamNonBlocking, descendingPriority);
+			if(descendingPriority < priority_low){
+				descendingPriority++;
+			}
+		} // end for setup of each device
+
+		// TODO: A seemingly unique approach to speeding up the cumulative cost calculation of very large DTW matrix traversal is to calculate the leading swath column (dtwCostSoFar)
+		// from *both ends* of the matrix in parallel, then if we carefully picked column n/2 as the dtwCostSoFar going forward and column n/2+1 as the dtwCostSoFar going 
+		// backward (given n columns in the DTW matrix), we can run a special single column path choice that calculates the minimal total cost "meeting in the middle". This is 
+		// somewhat akin to how lightning actually can connect the least resistent "stepped leader" bolt emanating ground-to-sky with the return bolt coming
+		// downward sky-to-ground. Hence I'm calling this technique "Lightning DTW".
+		// e.g. Imagine a DTW matrix with 9 rows and 2200 columns. The last forward dtwCoSoFar column is 1100, the last backward dtwCostSoFar column is 1101.
+		// Calculating the total minimal traversal cost calculation might look as follows;
+		//
+		// fwd_column_1100_cost  rev_column_1101_cost  DTW_steps_column_1100_to_110_through_this_row  total_cost_for_traversal_through_this_row_at_column_1101
+		// row9             100  110                   DIAG                                           210    
+		// row8             100  110                   DIAG                                           163
+		// row7              53  110                   DIAG                                           138
+		// row6              28  115                   RIGHT                                          143
+		// row5              46  120                   DIAG                                           150
+		// row4              30  105                   RIGHT                                          135
+		// row3              75  107                   RIGHT                                          182
+		// row2              93  99                    RIGHT                                          192
+		// row1             100  110                   RIGHT                                          210
+		//                            min(total_cost_for_traversal_through_this_row_at_column_1101) = 135
+		//
+		// The moves are necessarily diagonal or right because up moves on column 1100 (or 'down' on 1101) are already baked into the cumulative costs. Note that for row 9, all things be equal we pick 
+		// diagonal moves over right moves, though the "choice" is immaterial in simple total cost calculation.
+		
 		for(size_t offset_within_seq = 0; offset_within_seq < maxSeqLength; offset_within_seq += threadblockDim.x){
-			// We have a circular buffer in shared memory of three diagonals for minimal proper DTW calculation, and an array for an inline findMin()
-        		int shared_memory_required = threadblockDim.x*3*sizeof(T);
-			// Null unsigned char pointer arg below means we aren't storing the path for each alignment right now.
-			// And (T *) 0, (size_t) 0, (T *) 0, (size_t) 0, means that the sequences to be compared will be defined by seq_index (1st, Y axis seq) and the block x index (2nd, X axis seq)
-			DTWDistance<<<gridDim,threadblockDim,shared_memory_required,seq_stream>>>((T *) 0, (size_t) 0, (T *) 0, (size_t) 0, seq_index, offset_within_seq, gpu_sequences, maxSeqLength,
-										num_sequences, sequence_lengths, dtwCostSoFar, newDtwCostSoFar, (unsigned char *) 0, (size_t) 0, gpu_dtwPairwiseDistances[currDevice], use_open_start, use_open_end); CUERR("DTW vertical swath calculation with cost storage");
-			cudaMemcpyAsync(dtwCostSoFar, newDtwCostSoFar, dtwCostSoFarSize, cudaMemcpyDeviceToDevice, seq_stream); CUERR("Copying DTW pairwise distance intermediate values");
-		}
+			for(int currDevice = 0; currDevice < deviceCount && seq_index + currDevice < num_sequences-1; currDevice++){
+				cudaSetDevice(currDevice);
+        			dim3 gridDim((num_sequences-seq_index-currDevice-1), 1, 1);
+				// We have a circular buffer in shared memory of three diagonals for minimal proper DTW calculation, and an array for an inline findMin()
+        			int shared_memory_required = threadblockDim.x*3*sizeof(T);
+				// Null unsigned char pointer arg below means we aren't storing the path for each alignment right now.
+				// And (T *) 0, (size_t) 0, (T *) 0, (size_t) 0, means that the sequences to be compared will be defined by seq_index (1st, Y axis seq) and the block x index (2nd, X axis seq)
+				DTWDistance<<<gridDim,threadblockDim,shared_memory_required,seq_stream[currDevice]>>>((T *) 0, (size_t) 0, (T *) 0, (size_t) 0, seq_index+currDevice, offset_within_seq, gpu_sequences, maxSeqLength,
+										num_sequences, sequence_lengths, dtwCostSoFar[currDevice], newDtwCostSoFar[currDevice], 
+										(unsigned char *) 0, (size_t) 0, gpu_dtwPairwiseDistances[currDevice], 
+										use_open_start, use_open_end); CUERR("DTW vertical swath calculation with cost storage");
+				cudaMemcpyAsync(dtwCostSoFar[currDevice], newDtwCostSoFar[currDevice], dtwCostSoFarSize[currDevice], cudaMemcpyDeviceToDevice, seq_stream[currDevice]); CUERR("Copying DTW pairwise distance intermediate values");
+				if(offset_within_seq+threadblockDim.x >= maxSeqLength){
+					dotsPrinted = updatePercentageComplete(seq_index+currDevice, num_sequences-1, dotsPrinted);
+				}
+			}
+		} 
 		// Will cause memory to be freed in callback after seq DTW completion, so the sleep_for() polling above can 
 		// eventually release to launch more kernels as free memory increases (if it's not already limited by the kernel grid block queue).
-		addStreamCleanupCallback(dtwCostSoFar, newDtwCostSoFar, 0, seq_stream);
+		for(int currDevice = 0; currDevice < deviceCount && seq_index + currDevice < num_sequences-1; currDevice++){
+			addStreamCleanupCallback(dtwCostSoFar[currDevice], newDtwCostSoFar[currDevice], 0, seq_stream[currDevice]);
+		}
 	}
 	std::cerr << std::endl;
         cudaFreeHost(maxThreads); CUERR("Freeing CPU memory for device thread properties");
@@ -323,10 +376,10 @@ void updateCentroid(T *seq, T *centroidElementSums, unsigned int *nElementsForMe
 		j = tmp;
 	}
 	// This is used in stripe backtracing mode, to change from global seq/centroid coords to local stripe coords used in the stripe being processed by this call.
-	j -= column_offset; 
+	//j -= column_offset; 
 	// If we set stripe mode, the height of the effective matrix is taken from GPU memory from last call to this function.
 	if(stripe_rows){
-		i = *stripe_rows - 1;
+		i = ((int) *stripe_rows) - 1;
 	}
 
 	unsigned char move = pathMatrix[pitchedCoord(j,i,pathMemPitch)];
@@ -350,8 +403,8 @@ void updateCentroid(T *seq, T *centroidElementSums, unsigned int *nElementsForMe
 			asm("trap;"); 
 	        }
 		if(move != NIL_OPEN_RIGHT) {
-			atomicAdd(&centroidElementSums[0], seq[0]);
-			atomicInc(&nElementsForMean[0], numeric_limits<unsigned int>::max());
+			atomicAdd_system(&centroidElementSums[0], seq[0]);
+			atomicInc_system(&nElementsForMean[0], numeric_limits<unsigned int>::max());
 		}
 	}
 	else if(j != -1 || i < 0){ // if in stripe mode we should have traversed past the left edge, but not past the bottom
@@ -372,10 +425,13 @@ void updateCentroid(T *seq, T *centroidElementSums, unsigned int *nElementsForMe
 template<typename T>
 __host__ double 
 DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_t num_sequences, size_t *sequence_lengths, int use_open_start, int use_open_end, T *updatedMean, std::string output_prefix, cudaStream_t stream) {
+
 	T *gpu_centroidAlignmentSums;
+	// cudaSetDevice(#); not strictly necessary here since all the consensus variables are managed memory, which in the unified memory model are accessible across all devices
+	// we do require compute capability 6.0+ so that atomicAdd "system" flavor works across devices
 	cudaMallocManaged(&gpu_centroidAlignmentSums, sizeof(T)*centerLength); CUERR("Allocating GPU memory for barycenter update sequence element sums");
 	cudaMemset(gpu_centroidAlignmentSums, 0, sizeof(T)*centerLength); CUERR("Initialzing GPU memory for barycenter update sequence element sums to zero");
-
+	
 	T *cpu_centroid;
         cudaMallocHost(&cpu_centroid, sizeof(T)*centerLength); CUERR("Allocating CPU memory for incoming centroid");
 	cudaMemcpy(cpu_centroid, C, sizeof(T)*centerLength, cudaMemcpyDeviceToHost); CUERR("Copying incoming GPU centroid to CPU");
@@ -387,6 +443,10 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 	deviceCount = 1;
 #endif
         unsigned int *maxThreads = getMaxThreadsPerDevice(deviceCount);
+	// For testing purposes, see if 1024 is faster than maxThreads
+        for(int i = 0; i < deviceCount; i++){
+                maxThreads[i] = 1024;
+        }
 
 	unsigned int *nElementsForMean, *cpu_nElementsForMean; // Using unsigned int rather than size_t so we can use CUDA atomic operations on their GPU counterparts.
 	cudaMallocManaged(&nElementsForMean, sizeof(unsigned int)*centerLength); CUERR("Allocating GPU memory for barycenter update sequence pileup");
@@ -399,17 +459,18 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 
         // Allocate space for the dtwCost to get to each point on the border between grid vertical swaths of the total cost matrix against the consensus C.
 	// Generate the path matrix though for each sequence relative to the centroid, and update the centroid means accordingly.
+
 	int dotsPrinted = 0;
        	size_t current_seq_length[deviceCount];
 	int flip_seq_order[deviceCount]; // boolean
         cudaStream_t seq_stream[deviceCount];
 	T **dtwCostSoFar = new T * [deviceCount];
-        T **newDtwCostSoFar = new T * [deviceCount];
-	int **gpu_backtrace_rows = new int * [deviceCount]; // for consensus update: backtracking indicator of first (vertical) seq in the DTW cost matrix for use with stripe mode
+        T *newDtwCostSoFar[deviceCount] = {};
+	int *gpu_backtrace_rows[deviceCount] = {}; // for consensus update: backtracking indicator of first (vertical) seq in the DTW cost matrix for use with stripe mode
        	size_t pathPitch[deviceCount];
-       	unsigned char **pathMatrix = new unsigned char *[deviceCount];
+       	unsigned char *pathMatrix[deviceCount] = {};
 	bool usingStripePath[deviceCount];
-	int cpu_backtrace_rows[deviceCount]; // for printing DTW path: backtracking indicator of first (vertical) seq in the DTW cost matrix for use with stripe mode
+	int cpu_backtrace_rows[deviceCount] = {}; // for printing DTW path: backtracking indicator of first (vertical) seq in the DTW cost matrix for use with stripe mode
 	std::ofstream **cpu_backtrace_outputstream = new std::ofstream *[deviceCount]; // for printing DTW path: defined outside print method so that we can print in multiple parts during stripe mode
 	unsigned char **cpu_stepMatrix = new unsigned char *[deviceCount]; // for client side copy of DTW path matrix that we're going to print
 	for(size_t seq_index = 0; seq_index < num_sequences; seq_index++){
@@ -456,32 +517,41 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
                 if(freeGPUMem < dtwCostSoFarSize+pathMatrixSize*1.05){ // assume pitching could add up to 5%
 			pathMatrixSize = 0;
 			usingStripePath[currDevice] = true;
-			// We take up a lot more cost matrix space (X*Y/1024*4 for float) than normal mode (2*Y*4), but still less overall as we no longer allocate path matrix of (X*Y)
-			dtwCostSoFarSize = sizeof(T)*current_seq_length[currDevice]*centerLength/threadblockDim.x;
 			// Set up the stripe vertical index once if we're in that mode
 			if(gpu_backtrace_rows[currDevice] == 0){
-				cudaMalloc(&gpu_backtrace_rows[currDevice], sizeof(int));  CUERR("Allocating a single integer for striped GPU backtrace vertical index");
+				cudaMallocManaged(&gpu_backtrace_rows[currDevice], sizeof(int));  CUERR("Allocating a single int for striped GPU backtrace vertical index");
+			}
+			// We take up a lot more cost matrix space (X*Y/1024*4 for float) than normal mode (2*Y*4), but still less overall as we no longer allocate path matrix of (X*Y)
+			if(flip_seq_order[currDevice]){
+				int l = (int) centerLength;
+				cudaMemcpy(gpu_backtrace_rows[currDevice], &l, sizeof(int), cudaMemcpyHostToDevice);  
+				CUERR("Running transfer of a flipped vertical index (a size_t) to the GPU in stripe mode");
+				dtwCostSoFarSize = sizeof(T)*centerLength*(std::ceil(((float)current_seq_length[currDevice])/threadblockDim.x));
+			}
+			else{
+				int l = (int) current_seq_length[currDevice];
+				cudaMemcpy(gpu_backtrace_rows[currDevice], &l, sizeof(int), cudaMemcpyHostToDevice);  
+				CUERR("Running transfer of vertical index (a size_t) to the GPU in stripe mode");
+				dtwCostSoFarSize = sizeof(T)*current_seq_length[currDevice]*(std::ceil(((float)centerLength)/threadblockDim.x)); // because the last stripe will report out the full cost at the rightmost column of the full matrix (though only top-row value is correct since UP is not enforced)
 			}
 			// Height of the cost matrix. Default is centroid on the X axis, flip (done for computational efficiency of open_right move 
 			// on longer seq or the pair) is centroid on Y axis.
-			cudaMemcpyAsync(gpu_backtrace_rows[currDevice], flip_seq_order[currDevice] ? &centerLength : &current_seq_length[currDevice], sizeof(int), cudaMemcpyHostToDevice, seq_stream[currDevice]);  
 			cpu_backtrace_rows[currDevice] = flip_seq_order[currDevice] ? centerLength : current_seq_length[currDevice];
-			CUERR("Initiating async transfer of verticla index (an integer) to the GPU in stripe mode");
                 }
 
 		dotsPrinted = updatePercentageComplete(seq_index+1, num_sequences, dotsPrinted);
 
 		if(usingStripePath[currDevice]){
 			// In the case of a truly massive path matrix or a tiny GPU memory pool, fall back gracefully to using the stripe mode with managed memory
-			// where bits will be loaded in and out of page locked CPU RAM to the GPUi (at some cost to performance).
-			if(dtwCostSoFarSize > freeGPUMem){
+			// where bits will be loaded in and out of page locked CPU RAM to the GPU (at some cost to performance).
+			//if(dtwCostSoFarSize > freeGPUMem){
 				cudaMallocManaged(&dtwCostSoFar[currDevice], dtwCostSoFarSize);  CUERR("Allocating managed memory for DTW pairwise distance striped intermediate values in DBA update");
 				// TODO: for now, we have only one process per device so not necessary, 
 				// but in future if multithreading per device use cudaStreamAttachMemAsync() to reduce memory access barriers.
-			}
-			else{
-				cudaMalloc(&dtwCostSoFar[currDevice], dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance striped intermediate values in DBA update");
-			}
+			//}
+			//else{
+				//cudaMalloc(&dtwCostSoFar[currDevice], dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance striped intermediate values in DBA update");
+		//	}
 			pathMatrix[currDevice] = 0; // this will get populated later as a small matrix stripe for recalc and backtracking, after all the cost DTW calculations for this seq are done
 		}
 		else{ // "Normal" full path matrix calculation
@@ -516,8 +586,9 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 			T *existingCosts = dtwCostSoFar[currDevice];
 			T *newCosts = newDtwCostSoFar[currDevice];
 			if(usingStripePath[currDevice]){ // In striped mode we store the result of every swath computed, so we move further into a larger cost buffer rather than recycling a smaller one.
-				existingCosts = dtwCostSoFar[currDevice] + offset_within_seq*(flip_seq_order[currDevice] ? centerLength : current_seq_length[currDevice]);
-				newCosts = dtwCostSoFar[currDevice] + offset_within_seq*(flip_seq_order[currDevice] ? centerLength : current_seq_length[currDevice]);
+				newCosts = dtwCostSoFar[currDevice] + offset_within_seq/threadblockDim.x*(flip_seq_order[currDevice] ? centerLength : current_seq_length[currDevice]);
+				// In striped mode the existing costs will point to unused nonsense for the first (leftmost) swath of the cost matrix.
+				existingCosts = newCosts - (flip_seq_order[currDevice] ? centerLength : current_seq_length[currDevice]);
 			}
 			// 0 arg here means that we are not storing the pairwise distance (total cost) between the sequences back out to global memory.
                         if(flip_seq_order[currDevice]){
@@ -534,7 +605,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 				// Specify both the first and second sequences explicitly (seq_index will actually be ignored)
 				DTWDistance<<<1,threadblockDim,shared_memory_required,seq_stream[currDevice]>>>(sequences[seq_index], current_seq_length[currDevice], C, centerLength, 
 						PARAM_NOT_USED, offset_within_seq, (T *)PARAM_NOT_USED, PARAM_NOT_USED, num_sequences, (size_t *) PARAM_NOT_USED, 
-						dtwCostSoFar[currDevice], newDtwCostSoFar[currDevice], 
+						existingCosts, newCosts, 
 						pathMatrix[currDevice], pathPitch[currDevice], (T *) PARAM_NOT_USED, use_open_start, use_open_end); CUERR("Sequence DTW vertical swath calculation with path storage");
 				if(!usingStripePath[currDevice]){ // recycling cost buffers in full path matrix mode
 					cudaMemcpyAsync(existingCosts, newCosts, dtwCostSoFarSize, cudaMemcpyDeviceToDevice, seq_stream[currDevice]); CUERR("Copying DTW pairwise distance intermediate values without flipped sequence order");
@@ -543,7 +614,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 #if DEBUG == 1
 			cudaStreamSynchronize(seq_stream[currDevice]);  CUERR("Synchronizing prioritized CUDA stream mid-path for debug output");
 			for(int i = 0; i < dtw_limit; i++){
-				cost << dtwCostSoFar[i] << ", ";
+				cost << newCosts[i] << ", ";
 			}
 			cost << std::endl;
 #endif
@@ -574,7 +645,6 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
         	// start in the upper right corner of the cost matrix and work our way backward to the lower left corner
         	// by successively recalculating the DTW costs and paths from the known left edge of a threadblock swath (which
         	// was stored in the cost matrix) to the right edge.
-		//std::cerr << "striped count is " << stripeCount << std::endl;
                	if(stripeCount > 0){ // This becomes blocking. No simple way around this without using tons more memory.
 			size_t offset_within_seq[currDevice+1];
 			size_t j_completed[currDevice+1]; // for striped path printing
@@ -585,18 +655,29 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 					remaining_offsets_to_process += offset_within_seq[queuedDevice];
 				}
 			}
-			while(remaining_offsets_to_process){ // There is at least one device that hasn't gotten to the left edge of the alignment yet
+			while(remaining_offsets_to_process){ // There is at least one device that hasn't gotten to the left edge of the alignment cost matrix yet
 				remaining_offsets_to_process = 0;
 				for(int queuedDevice = 0; queuedDevice <= currDevice; queuedDevice++){
 					if(!usingStripePath[queuedDevice]){
 						continue;
 					}
 					dim3 threadblockDim(maxThreads[queuedDevice], 1, 1);
+					cudaSetDevice(queuedDevice);
                 			// We need to assign a path matrix big enough to handle the results of one vertical swath of the DTW calculation, so we can record the path steps
                 			if(pathMatrix[queuedDevice] == 0){ // assign it only on the first rightmost stripe of the traceback and reuse (any subsequent leftward rounds will require the same or less)
-                				// TODO: gracefully degrade to manually pitched managed memory if this allocation fails.
-						cudaMallocPitch(&pathMatrix[queuedDevice], &pathPitch[queuedDevice], threadblockDim.x, cpu_backtrace_rows[queuedDevice]);  CUERR("Allocating path matrix for striped sequence-centroid DTW path traceback");
-						cudaMallocHost(&cpu_stepMatrix[queuedDevice], sizeof(unsigned char)*pathPitch[queuedDevice]*cpu_backtrace_rows[queuedDevice]); CUERR("Allocating CPU memory for striped step matrix");
+                				// Gracefully degrade to manually pitched managed memory if this allocation fails.
+						if(cudaMallocPitch(&pathMatrix[queuedDevice], &pathPitch[queuedDevice], threadblockDim.x*sizeof(unsigned char), cpu_backtrace_rows[queuedDevice])){  
+							//std::cerr << "Stripe pitched managed memory for path matrix for device "<< queuedDevice<<std::endl;
+							cudaMallocManaged(&pathMatrix[queuedDevice], sizeof(unsigned char)*pathPitch[queuedDevice]*cpu_backtrace_rows[queuedDevice]); CUERR("Allocating pseudo-pitched managed memory for striped step matrix");
+							cudaStreamAttachMemAsync(seq_stream[queuedDevice], pathMatrix[queuedDevice]); CUERR("Attaching pseudo-pitched managed memory for striped step matrix to the corresponding sequence stream");
+						}
+						//std::cerr << "Stripe path matrix on host for device "<< queuedDevice<<": " << sizeof(unsigned char) << " x " << pathPitch[queuedDevice] << " x " << cpu_backtrace_rows[queuedDevice] << std::endl;
+						// Using a standard malloc as this is GPU -> CPU read-once memory, no compelling need to burden the OS with massive page locked memory
+						cpu_stepMatrix[queuedDevice] = (unsigned char *) std::malloc(sizeof(unsigned char)*pathPitch[queuedDevice]*cpu_backtrace_rows[queuedDevice]);
+					       	if(cpu_stepMatrix[queuedDevice] == 0){
+							std::cerr << "Allocating normal CPU memory for path matrix for striped sequence-centroid DTW path traceback" << std::endl;
+							exit(CANNOT_ALLOCATE_HOST_STRIPED_STEP_MATRIX);
+						}
 					}
                 			// We have a circular buffer in shared memory of three diagonals for minimal proper DTW calculation.
                 			int shared_memory_required = threadblockDim.x*3*sizeof(T);
@@ -607,12 +688,12 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
                                                 continue;
 					}
 					// Round down the offset to the next swath start (multiple of the threadblock width), specifically for the first round where it's likely a partial swath (rightmost)
-					int left_column = offset_within_seq[queuedDevice]/threadblockDim.x*threadblockDim.x;
-                        		// Index into the cost matrix is -1 because we want the LEFT edge. offset_within_seq == 0 will have nonsense value but that's okay as per special case below.
-                        		T *existingCosts = dtwCostSoFar[queuedDevice] + (left_column/threadblockDim.x-1)*(flip_seq_order[queuedDevice] ? centerLength : current_seq_length[queuedDevice]);
+					int left_column = (std::ceil(((float) offset_within_seq[queuedDevice])/threadblockDim.x)-1)*threadblockDim.x;
+                        		// Index into the cost matrix is the LEFT edge of the swath being processed.
+                        		T *existingCosts = dtwCostSoFar[queuedDevice] + (left_column-threadblockDim.x)/threadblockDim.x*(flip_seq_order[queuedDevice] ? centerLength : current_seq_length[queuedDevice]);
                         		if(flip_seq_order[queuedDevice]){
                                 		// Specify both the first and second sequences explicitly (seq_index will actually be ignored).
-                                		// Note that we aren't computing all the vertical swath necessarily, only up to where the DTW traceback has gotten
+                                		// Note that we aren't computing all the vertical swath necessarily, only up to where the DTW traceback has gotten (cpu_backtrace_rows[queuedDevice])
                                 		// us so far in eating up the Y axis sequence (DP matrix row index i, but using i+1 since it's a "size" parameter, not an index).
                                 		// This cuts the average number of alignment cost re-calculations in half for the striped traceback vs. a full matrix re-calc.
                                 		DTWDistance<<<1,threadblockDim,shared_memory_required,seq_stream[queuedDevice]>>>(C, cpu_backtrace_rows[queuedDevice], sequences[seq_index-currDevice+queuedDevice], current_seq_length[queuedDevice],
@@ -629,7 +710,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
                                                		pathMatrix[queuedDevice], pathPitch[queuedDevice], 
 							(T *) PARAM_NOT_USED, use_open_start, use_open_end); CUERR("Sequence DTW vertical swath calculation launch with path storage");
                         		}
-					// The i matrix vertical index will gradually decrease as we move from the top of the full alignment matrix to the bottom, but j (horizontal) is local to the stripe.
+					// The i matrix vertical index (saved as [cg]pu_backtrace_rows) will gradually decrease as we move from the top of the full alignment matrix to the bottom, but j (horizontal) is local to the stripe.
 					int j = offset_within_seq[queuedDevice]%maxThreads[queuedDevice]; // was it a partial block filled in the path matrix that was allocated?
                         		if(j == 0){ // it was a full block, set the width accordingly (since a zero width block would never be run)
 					       	j = maxThreads[queuedDevice]; 
@@ -638,21 +719,33 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 					offset_within_seq[queuedDevice] -= j;
 					remaining_offsets_to_process += offset_within_seq[queuedDevice];
 					// Partial centroid update, just for the path part inside the stripe we recalculated above. Will update value of gpu_backtrace_rows too with new height of remaining matrix to view.
-					updateCentroid<<<1,1,0,seq_stream[queuedDevice]>>>(sequences[seq_index], gpu_centroidAlignmentSums, nElementsForMean, pathMatrix[currDevice], 
-							j, 0, pathPitch[queuedDevice], flip_seq_order[currDevice], offset_within_seq[queuedDevice], gpu_backtrace_rows[queuedDevice]);  CUERR("Launching centroid update using striped path");
+					int pathColumns = flip_seq_order[queuedDevice] ? current_seq_length[queuedDevice] : j;
+					int pathRows = flip_seq_order[queuedDevice] ? j : centerLength;
+					updateCentroid<<<1,1,0,seq_stream[queuedDevice]>>>(sequences[seq_index-currDevice+queuedDevice], gpu_centroidAlignmentSums, nElementsForMean, pathMatrix[queuedDevice], 
+							pathColumns, pathRows,
+							pathPitch[queuedDevice], flip_seq_order[queuedDevice], offset_within_seq[queuedDevice], gpu_backtrace_rows[queuedDevice]);  CUERR("Launching centroid update using striped path");
 					j_completed[queuedDevice] = j;
 				}
 				for(int queuedDevice = 0; queuedDevice <= currDevice; queuedDevice++){ // Print the partial paths serially
+					cudaSetDevice(queuedDevice);
 					if(!usingStripePath[queuedDevice]){
 						continue;
 					}
                        			cudaStreamSynchronize(seq_stream[queuedDevice]); // wait for the result of the DTW calculation for the swath/stripe
+					//std::cerr << "Copying back pathMatrix to CPU for index " << offset_within_seq[queuedDevice] << ": " << sizeof(unsigned char)*pathPitch[queuedDevice]*cpu_backtrace_rows[queuedDevice] << std::endl;
                                 	cudaMemcpy(cpu_stepMatrix[queuedDevice], pathMatrix[queuedDevice], 
 							sizeof(unsigned char)*pathPitch[queuedDevice]*cpu_backtrace_rows[queuedDevice], cudaMemcpyDeviceToHost);  CUERR("Copying GPU to CPU memory for striped step matrix in DBA update");
+#if DEBUG == 1
+					/* Start of debugging code, which saves the DTW path for each sequence vs. consensus. Requires C++11 compatibility. */
+					std::string step_filename = output_prefix+std::string("stepmatrix")+std::to_string(seq_index-currDevice+queuedDevice)+"."+std::to_string(offset_within_seq[queuedDevice]);
+					writeDTWPathMatrix<T>(cpu_stepMatrix[queuedDevice], step_filename.c_str(), j_completed[queuedDevice], cpu_backtrace_rows[queuedDevice], pathPitch[queuedDevice]);
+					//writeDTWPathMatrix<T>(pathMatrix[queuedDevice], step_filename.c_str(), j_completed[queuedDevice], cpu_backtrace_rows[queuedDevice], pathPitch[queuedDevice]);
+#endif
 					
                         		// Note this stripe's steps for the traceback, before we reuse the pathMatrix buffer for the left-neighbouring stripe.
-					// Even if you don't want to print, you have to do this sot hat the next kernel launch of DTWDeistance above has the updated value for cpu_backtrace_rows.
+					// Even if you don't want to print, you have to do this so that the next kernel launch of DTWDistance above has the updated value for cpu_backtrace_rows.
 					writeDTWPath(cpu_stepMatrix[queuedDevice], cpu_backtrace_outputstream[queuedDevice], sequences[seq_index-currDevice+queuedDevice], 
+					//writeDTWPath(pathMatrix[queuedDevice], cpu_backtrace_outputstream[queuedDevice], sequences[seq_index-currDevice+queuedDevice], 
 							sequence_names[seq_index-currDevice+queuedDevice], current_seq_length[queuedDevice], 
 							cpu_centroid, centerLength, j_completed[queuedDevice], 0, pathPitch[queuedDevice], flip_seq_order[queuedDevice], 
 							offset_within_seq[queuedDevice], &cpu_backtrace_rows[queuedDevice]);
@@ -661,6 +754,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 		} // end if(stripeCount)
 
 		for(int queuedDevice = 0; queuedDevice <= currDevice; queuedDevice++){
+			cudaSetDevice(queuedDevice);
 			cudaStreamSynchronize(seq_stream[queuedDevice]);  CUERR("Synchronizing prioritized CUDA stream in device-parallel update of sequence-centroid path calculations");
                 	cudaFree(dtwCostSoFar[queuedDevice]); CUERR("Freeing DTW intermediate cost values in DBA cleanup");
 			dtwCostSoFar[queuedDevice] = 0;
@@ -675,7 +769,10 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 			if(flip_seq_order[queuedDevice]){int tmp = num_rows; num_rows = num_columns; num_columns = tmp;}
 		
 			if(!output_prefix.empty() && !usingStripePath[queuedDevice]){ // only works if you have the full path matrix available
-	        		cudaMallocHost(&cpu_stepMatrix[queuedDevice], sizeof(unsigned char)*pathPitch[queuedDevice]*num_rows); CUERR("Allocating CPU memory for step matrix");
+	        		if((cpu_stepMatrix[queuedDevice] = (unsigned char *) std::malloc(sizeof(unsigned char)*pathPitch[queuedDevice]*num_rows)) == 0){
+					std::cerr << "Cannot allocate standard CPU memory for full step matrix" << std::endl;
+					exit(CANNOT_ALLOCATE_HOST_FULL_STEP_MATRIX);
+				}
         			cudaMemcpy(cpu_stepMatrix[queuedDevice], pathMatrix[queuedDevice], sizeof(unsigned char)*pathPitch[queuedDevice]*num_rows, cudaMemcpyDeviceToHost);  CUERR("Copying GPU to CPU memory for step matrix in DBA update");
 
 #if DEBUG == 1
@@ -692,7 +789,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 			(*(cpu_backtrace_outputstream[queuedDevice])).close();
 			delete cpu_backtrace_outputstream[queuedDevice];
 			if(cpu_stepMatrix[queuedDevice]){
-				cudaFreeHost(cpu_stepMatrix[queuedDevice]); CUERR("Freeing host memory for step matrix");
+				std::free(cpu_stepMatrix[queuedDevice]);
 				cpu_stepMatrix[queuedDevice] = 0;
 			}
                 	if(pathMatrix[queuedDevice] != 0){ // skip if using striped mode
@@ -731,9 +828,9 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 	cudaFreeHost(cpu_centroid); CUERR("Freeing CPU memory for the incoming centroid");
 
 	delete[] dtwCostSoFar; // Play nice and clean up the dynamic heap allocations.
-        delete[] newDtwCostSoFar;
-        delete[] gpu_backtrace_rows;
-        delete[] pathMatrix;
+        //delete[] newDtwCostSoFar;
+        //delete[] gpu_backtrace_rows;
+        //delete[] pathMatrix;
         delete[] cpu_backtrace_outputstream;
         delete[] cpu_stepMatrix;
 
@@ -807,7 +904,9 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	cudaStreamSynchronize(stream); CUERR("Synchronizing the CUDA stream after sequences' copy to GPU");
         // Pick a seed sequence from the original input, with the smallest L2 norm (residual sum of squares).
 	setupPercentageDisplay(CONCAT2("Step 2 of 3: Finding initial ",(cdist < 1 ? "clusters and medoids" : "medoid")));
+	//int sequences_membership[] = {0, 0, 0};
 	int* sequences_membership = new int[num_sequences];
+	//int medoidIndices[] = {0}; //approximateMedoidIndices(gpu_sequences, maxLength, num_sequences, sequence_lengths, sequence_names, use_open_start, use_open_end, output_prefix, &cdist, sequences_membership, stream);
 	int *medoidIndices = approximateMedoidIndices(gpu_sequences, maxLength, num_sequences, sequence_lengths, sequence_names, use_open_start, use_open_end, output_prefix, &cdist, sequences_membership, stream);
 	teardownPercentageDisplay();	
 	// Don't need the full complement of evenly space sequences again.
@@ -1049,6 +1148,10 @@ __host__ void chopPrefixFromSequences(T *sequence_prefix, size_t sequence_prefix
 	cudaMallocHost(&chopPositions, sizeof(size_t)*(*num_sequences)); CUERR("Allocating CPU memory for sequence prefix chopping locations");
 
         unsigned int *maxThreads = getMaxThreadsPerDevice(deviceCount);
+	// For testing purposes, see if 1024 is faster than maxThreads
+	for(int i = 0; i < deviceCount; i++){
+		maxThreads[i] = 1024;
+	}
 
         // Declared sentinels to add semantics to DTWDistance call params.
         // A lot of DTW kernel parameters are ignored because we are launching without a real grid, so vars to infer 
