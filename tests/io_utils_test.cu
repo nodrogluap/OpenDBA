@@ -41,6 +41,7 @@ char* stringToChar(std::string tmp_string){
 	return cstr;
 }
 
+#if HDF5_SUPPORTED == 1
 TEST_CASE( " Write Fast5 Output " ){
 	
 	std::string series_filename_seq = current_working_dir + "/good_files/fast5/FAN41461_pass_496845aa_0.fast5";
@@ -160,3 +161,4 @@ TEST_CASE( " Write Fast5 Output " ){
 	free(filenames);
 	
 }
+#endif
