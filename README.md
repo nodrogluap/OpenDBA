@@ -20,6 +20,7 @@ git clone --recurse-submodules https://github.com/nodrogluap/OpenDBA/
 cd OpenDBA
 make HDF5_SUPPORTED=1
 make tests HDF5_SUPPORTED=1 
+```
 
 If you want to run this code on a GPU with Compute Capability less than 6.1 (manufactured before ~2016), you will need to remove the double precision floating point support from openDBA.cu by compiling like so:
 
