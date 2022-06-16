@@ -269,7 +269,7 @@ read_fast5_data(const char *fast5_file_name, T **sequences, char **sequence_name
 			continue;
 		}
 		T *t_seq = 0;
-		cudaMallocManaged(&t_seq, sizeof(T)*read_length);  CUERR("Cannot allocate CPU memory for FAST5 signal");
+		cudaMallocManaged(&t_seq, sizeof(T)*read_length);  CUERR("Cannot allocate managed memory for FAST5 signal");
 		// Convert the FAST5 raw shorts to the desired datatype from the template
 		for(int j = 0; j < read_length; j++){
 			t_seq[j] = (T) sequence_buffer[j];
