@@ -140,12 +140,27 @@ Given a *single* multi-FAST5 OpenDBA will now write the cluster sequence average
 
 ## Finding base modifications and minor fraction variants
 
-Preliminary support for identifying variants or base modifications that affect nanopore signal is provided by the rna_multimodality.sh script. After an OpenDBA run, any generated transcript cluster can be tested for positions where the picoamperage across all cluster reads appears to be multimodal. By default Hartigans' Dip Test is used. The script takes two arguments, the length of the reference RNA (e.g. 29903 for SARS-CoV-2 direct RNA data) for position reporting, and the cluster prefix. In the case below, we generate 30 clusters, and decide to look at the multimodality of consensus sites using the reads in cluster 14
+Preliminary support for identifying variants or base modifications that affect nanopore signal is provided by the rna_multimodality.sh script. After an OpenDBA run, any generated transcript cluster can be tested for positions where the picoamperage across all cluster reads appears to be multimodal. By default Hartigans' Dip Test is used as a highly precise estimate (low false positive rate), then [Kernel Density Estimation + Excess Mass](https://link.springer.com/article/10.1007/s11749-018-0611-5) as a high recall estimate (low false negative rate). The script takes two arguments, the length of the reference RNA (e.g. 29903 for SARS-CoV-2 direct RNA data) for position reporting, and the cluster prefix. In the case below, we generate 30 clusters, and decide to look at the multimodality of consensus sites using the reads in cluster 14
 
 ```bash
 openDBA fast5 float open_end myexperiment 4 direct_rna_leader_float.txt 30 ont_folder_name/*.fast5
 sh rna_multimodality.sh 29903 myexperiment.14
-   26053 26339 26604 26957 27320 27543 27667 27880 28215 28714 28983 29187 29428 29467 29715 29785
+```
+yields...
+```
+Hartigan Dip Test (low FP): 
+  [1] 26053 26339 26604 26957 27320 27543 27667 27880 28215 28714 28983 29187 
+ [13] 29428 29467 29715 29785
+KDE + Excess Mass (low FN): 
+  [1] 24831 25144 25581 25732 25944 25998 25999 26053 26062 26070 26076 26151
+ [13] 26206 26312 26339 26408 26574 26581 26587 26604 26673 26706 26753 26957
+ [25] 27043 27114 27160 27197 27272 27320 27324 27348 27398 27432 27440 27448
+ [37] 27543 27601 27647 27667 27691 27758 27841 27880 27914 27962 28013 28101
+ [49] 28121 28155 28165 28215 28269 28280 28368 28383 28462 28488 28508 28526
+ [61] 28563 28588 28697 28700 28702 28714 28739 28769 28827 28878 28892 28975
+ [73] 28983 29094 29101 29124 29187 29200 29249 29263 29266 29318 29332 29341
+ [85] 29351 29428 29467 29468 29509 29580 29686 29715 29719 29750 29752 29765
+ [97] 29766 29772 29785 29875
 ```
 
 ## Common Problems &amp; Solutions
