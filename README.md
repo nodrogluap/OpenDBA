@@ -138,6 +138,16 @@ Note that the K-means clustering ignores singleton branches in the dendrogram, s
 
 Given a *single* multi-FAST5 OpenDBA will now write the cluster sequence averages (including singletons verbatim) to ```outputprefix.avg.fast5```. This file can then be used as input for basecalling (has been tested with ONT's guppy). Particularly for direct RNA this can be useful, as single read basecall quality is still fairly poor. Averaging multiple sequences at the raw signal level can increase the accuracy of the basecalling as a kind of denoising step. For the moment, of you have multiple FAST5 files you'd like to average at the raw signal level, this must be done as a preprocessing step before you use OpenDBA. 
 
+## Finding base modifications and minor fraction variants
+
+Preliminary support for identifying variants or base modifications that affect nanopore signal is provided by the rna_multimodality.sh script. After an OpenDBA run, any generated transcript cluster can be tested for positions where the picoamperage across all cluster reads appears to be multimodal. By default Hartigans' Dip Test is used. The script takes two arguments, the length of the reference RNA (e.g. 29903 for SARS-CoV-2 direct RNA data), and the cluster prefix. In the case below, we generate 30 clusters, and decide to look at the multimodality of consensus sites using the reads in cluster 14
+
+```bash
+openDBA fast5 float open_end myexperiment 4 direct_rna_leader_float.txt 30 ont_folder_name/*.fast5
+sh rna_multimodality.sh myexperiment.14
+   26053 26339 26604 26957 27320 27543 27667 27880 28215 28714 28983 29187 29428 29467 29715 29785
+```
+
 ## Common Problems &amp; Solutions
 
 If the code does not compile, you may have encountered a bug in CentOS 7's glibc implementation. The solution can be found [here](https://github.com/nodrogluap/OpenDBA/issues/9).
