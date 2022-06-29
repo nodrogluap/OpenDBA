@@ -140,11 +140,11 @@ Given a *single* multi-FAST5 OpenDBA will now write the cluster sequence average
 
 ## Finding base modifications and minor fraction variants
 
-Preliminary support for identifying variants or base modifications that affect nanopore signal is provided by the rna_multimodality.sh script. After an OpenDBA run, any generated transcript cluster can be tested for positions where the picoamperage across all cluster reads appears to be multimodal. By default Hartigans' Dip Test is used. The script takes two arguments, the length of the reference RNA (e.g. 29903 for SARS-CoV-2 direct RNA data), and the cluster prefix. In the case below, we generate 30 clusters, and decide to look at the multimodality of consensus sites using the reads in cluster 14
+Preliminary support for identifying variants or base modifications that affect nanopore signal is provided by the rna_multimodality.sh script. After an OpenDBA run, any generated transcript cluster can be tested for positions where the picoamperage across all cluster reads appears to be multimodal. By default Hartigans' Dip Test is used. The script takes two arguments, the length of the reference RNA (e.g. 29903 for SARS-CoV-2 direct RNA data) for position reporting, and the cluster prefix. In the case below, we generate 30 clusters, and decide to look at the multimodality of consensus sites using the reads in cluster 14
 
 ```bash
 openDBA fast5 float open_end myexperiment 4 direct_rna_leader_float.txt 30 ont_folder_name/*.fast5
-sh rna_multimodality.sh myexperiment.14
+sh rna_multimodality.sh 29903 myexperiment.14
    26053 26339 26604 26957 27320 27543 27667 27880 28215 28714 28983 29187 29428 29467 29715 29785
 ```
 
