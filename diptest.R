@@ -21,5 +21,5 @@ for(i in 1:n) {
   pvals <- append(pvals, dip.test(as.numeric(unlist(strsplit(as.character(vals[2]),','))))$p.value)
 }
 qvals <- p.adjust(pvals, method="fdr")
-cat("Hartigans' Dip Test (low FP):\n")
+cat("Hartigan Dip Test (low FP):\n")
 which(qvals < .05) + as.numeric(poss[1])
