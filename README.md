@@ -146,7 +146,7 @@ Preliminary support for identifying variants or base modifications that affect n
 openDBA fast5 float open_end myexperiment 4 direct_rna_leader_float.txt 30 ont_folder_name/*.fast5
 sh rna_multimodality.sh 29903 myexperiment.14
 ```
-yields...
+yields two files ``myexperiment.14.multimodal.diptest.txt`` and ``myexperiment.14.multimodal.kde_smoothing_plus_excess_mass.txt``...
 ```
 Hartigan Dip Test (low FP): 
   [1] 26053 26339 26604 26957 27320 27543 27667 27880 28215 28714 28983 29187 
@@ -162,6 +162,8 @@ KDE + Excess Mass (low FN):
  [85] 29351 29428 29467 29468 29509 29580 29686 29715 29719 29750 29752 29765
  [97] 29766 29772 29785 29875
 ```
+
+To use these tests, one must have ``R`` installed with the ``multimode`` and ``diptest`` packages. This is most easily acheived by install the OpenDBA conda environment as detailed at the bottom of this README.
 
 ## Common Problems &amp; Solutions
 
