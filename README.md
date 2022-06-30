@@ -163,7 +163,7 @@ KDE + Excess Mass (low FN):
  [97] 29766 29772 29785 29875
 ```
 
-To use these tests, one must have ``R`` installed with the ``multimode`` and ``diptest`` packages. This is most easily acheived by install the OpenDBA conda environment as detailed at the bottom of this README.
+To use these tests, one must have ``R`` installed with the ``multimode`` and ``diptest`` packages. 
 
 ## Common Problems &amp; Solutions
 
