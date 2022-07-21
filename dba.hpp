@@ -1,6 +1,7 @@
 #ifndef __dba_hpp_included
 #define __dba_hpp_included
 
+#include <limits>
 #include <thrust/sort.h>
 #include <iostream>
 #include <fstream>
@@ -442,6 +443,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 	// Device parallelism is not compatible with debug printing of intermediate path cost matrix columns
 	deviceCount = 1;
 #endif
+	// TODO: parallelize within devices
         unsigned int *maxThreads = getMaxThreadsPerDevice(deviceCount);
 	// For testing purposes, see if 1024 is faster than maxThreads
         for(int i = 0; i < deviceCount; i++){
