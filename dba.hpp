@@ -85,7 +85,7 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 			size_t freeGPUMem;
 			size_t totalGPUMem;
 			cudaMemGetInfo(&freeGPUMem, &totalGPUMem);	
-			while(freeGPUMem < dtwCostSoFarSize[currDevice]){
+			if(freeGPUMem < dtwCostSoFarSize[currDevice]){
 				//std::this_thread::sleep_for(std::chrono::seconds(1));
 				#ifdef _WIN32
 					Sleep(1000);
@@ -93,11 +93,12 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 					usleep(1000000);
 				#endif
 				// This is a super tight loop for the all-vs-all, not willing to move to managed memory just now.
-				std::cerr << "Waiting for memory to be freed before launching " << std::endl;
-				cudaMemGetInfo(&freeGPUMem, &totalGPUMem);
+				std::cerr << "Note: Insufficient free GPU memory (" << freeGPUMem << " bytes of total " << totalGPUMem << 
+					     ") on device " << currDevice << 
+					     " for initial medoid calculation (need " << dtwCostSoFarSize[currDevice] << "), calculation speed may suffer." << std::endl;
 			}
-			cudaMallocManaged(&dtwCostSoFar[currDevice], dtwCostSoFarSize[currDevice]);  CUERR("Allocating GPU memory for DTW pairwise distance intermediate values");
-			cudaMallocManaged(&newDtwCostSoFar[currDevice], dtwCostSoFarSize[currDevice]); CUERR("Allocating GPU memory for new DTW pairwise distance intermediate values");
+			cudaMallocManaged(&dtwCostSoFar[currDevice], dtwCostSoFarSize[currDevice]);  CUERR("Allocating managed memory for DTW pairwise distance intermediate values");
+			cudaMallocManaged(&newDtwCostSoFar[currDevice], dtwCostSoFarSize[currDevice]); CUERR("Allocating managed memory for new DTW pairwise distance intermediate values");
 
 			// Make calls to DTWDistance serial within each seq, but allow multiple seqs on the GPU at once.
 			cudaStreamCreateWithPriority(&seq_stream[currDevice], cudaStreamNonBlocking, descendingPriority);
