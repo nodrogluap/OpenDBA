@@ -175,13 +175,13 @@ scan_fast5_data(const char *fast5_file_name, size_t *num_sequences){
 #endif
 
 int
-scan_tsv_data(const char *text_file_name, size_t *num_sequences){
+scan_tsv_data(const char *tsv_file_name, size_t *num_sequences){
 
   	// Count the number of lines in the file (buffering 1MB on read for speed) so we know how much space to allocate for sequence pointers 
   	// std::ios::sync_with_stdio(false); // optimization
   	const int SZ = 1024 * 1024;
   	std::vector <char> read_buffer( SZ );
-  	std::ifstream ifs(text_file_name, std::ios::binary); // Don't bother translating EOL as we are counting only, so using binary mode (PC + *NIX) 
+  	std::ifstream ifs(tsv_file_name, std::ios::binary); // Don't bother translating EOL as we are counting only, so using binary mode (PC + *NIX) 
   	if(!ifs){
     		return 1;
   	}
@@ -293,11 +293,11 @@ read_fast5_data(const char *fast5_file_name, T **sequences, char **sequence_name
 
 template <typename T>
 int
-read_tsv_data(const char *text_file_name, T **sequences, char **sequence_names, size_t *sequence_lengths){
+read_tsv_data(const char *tsv_file_name, T **sequences, char **sequence_names, size_t *sequence_lengths){
 	int local_seq_count_so_far = 0;
 	// One sequence per line, values tab separated.
 	
-	std::ifstream ifs(text_file_name);
+	std::ifstream ifs(tsv_file_name);
 	if(!ifs){
                 return 0;
         }
@@ -306,7 +306,7 @@ read_tsv_data(const char *text_file_name, T **sequences, char **sequence_names, 
 		int numDataColumns = std::count(line.begin(), line.end(), '\t');
 		sequence_lengths[local_seq_count_so_far] = numDataColumns;
 		T *this_seq;
-		cudaMallocManaged(&this_seq, sizeof(T)*numDataColumns); CUERR("Cannot allocate CPU memory for reading sequence from TSV file");
+		cudaMallocManaged(&this_seq, sizeof(T)*numDataColumns); CUERR("Cannot allocate managed memory for reading sequence from TSV file");
 		sequences[local_seq_count_so_far] = this_seq;
 
 		std::istringstream iss(line);
@@ -337,9 +337,9 @@ int readSequenceTSVFiles(char **filenames, int num_files, T ***sequences, char *
 	}
 	std::cerr << ", total sequence count " << total_seq_count << std::endl;
         std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
-        cudaMallocManaged(sequences, sizeof(T *)*total_seq_count); CUERR("Allocating CPU memory for sequence pointers");
+        cudaMallocManaged(sequences, sizeof(T *)*total_seq_count); CUERR("Allocating managed memory for sequence pointers");
         cudaMallocHost(sequence_names, sizeof(char *)*total_seq_count); CUERR("Allocating CPU memory for sequence lengths");
-        cudaMallocManaged(sequence_lengths, sizeof(size_t)*total_seq_count); CUERR("Allocating CPU memory for sequence lengths");
+        cudaMallocManaged(sequence_lengths, sizeof(size_t)*total_seq_count); CUERR("Allocating managed memory for sequence lengths");
 
         int dotsPrinted = 0;
         char spinner[4] = { '|', '/', '-', '\\'};
