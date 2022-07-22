@@ -547,14 +547,9 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 		if(usingStripePath[currDevice]){
 			// In the case of a truly massive path matrix or a tiny GPU memory pool, fall back gracefully to using the stripe mode with managed memory
 			// where bits will be loaded in and out of page locked CPU RAM to the GPU (at some cost to performance).
-			//if(dtwCostSoFarSize > freeGPUMem){
-				cudaMallocManaged(&dtwCostSoFar[currDevice], dtwCostSoFarSize);  CUERR("Allocating managed memory for DTW pairwise distance striped intermediate values in DBA update");
-				// TODO: for now, we have only one process per device so not necessary, 
-				// but in future if multithreading per device use cudaStreamAttachMemAsync() to reduce memory access barriers.
-			//}
-			//else{
-				//cudaMalloc(&dtwCostSoFar[currDevice], dtwCostSoFarSize);  CUERR("Allocating GPU memory for DTW pairwise distance striped intermediate values in DBA update");
-		//	}
+			cudaMallocManaged(&dtwCostSoFar[currDevice], dtwCostSoFarSize);  CUERR("Allocating managed memory for DTW pairwise distance striped intermediate values in DBA update");
+			// TODO: for now, we have only one process per device so not necessary, 
+			// but in future if multithreading per device use cudaStreamAttachMemAsync() to reduce memory access barriers.
 			pathMatrix[currDevice] = 0; // this will get populated later as a small matrix stripe for recalc and backtracking, after all the cost DTW calculations for this seq are done
 		}
 		else{ // "Normal" full path matrix calculation
@@ -615,9 +610,14 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 				}
 			}
 #if DEBUG == 1
+			T *hostCosts = newCosts;
+			if(!usingStripePath[currDevice]){ // need to grab from the device memory, i.e. the pointer isn't managed
+				cudaMallocHost(&hostCosts, dtwCostSoFarSize); CUERR("Allocating host memory for  debug print statements of sequence-centroid DTW cost matrix");
+				cudaMemcpyAsync(hostCosts, newCosts, dtwCostSoFarSize, cudaMemcpyDeviceToHost, seq_stream[currDevice]); CUERR("Copying DTW pairwise distance intermediate values from device to host debug printing");
+			}
 			cudaStreamSynchronize(seq_stream[currDevice]);  CUERR("Synchronizing prioritized CUDA stream mid-path for debug output");
 			for(int i = 0; i < dtw_limit; i++){
-				cost << newCosts[i] << ", ";
+				cost << hostCosts[i] << ", ";
 			}
 			cost << std::endl;
 #endif
