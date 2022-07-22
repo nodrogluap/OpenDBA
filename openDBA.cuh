@@ -45,11 +45,12 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	if(seqprefix_file_name != 0){
 		T **seqprefix = 0;
 		size_t *seqprefix_length = 0;
+		char** seqprefix_name;
 		if(read_mode == BINARY_READ_MODE){
-			readSequenceBinaryFiles<T>(&seqprefix_file_name, 1, &seqprefix, &sequence_names, &seqprefix_length);
+			readSequenceBinaryFiles<T>(&seqprefix_file_name, 1, &seqprefix, &seqprefix_name, &seqprefix_length);
 		}
 		else{
-			readSequenceTextFiles<T>(&seqprefix_file_name, 1, &seqprefix, &sequence_names, &seqprefix_length);
+			readSequenceTextFiles<T>(&seqprefix_file_name, 1, &seqprefix, &seqprefix_name, &seqprefix_length);
 		}
 		if(*seqprefix_length == 0){
 			std::cerr << "Cannot read prefix " << (read_mode == BINARY_READ_MODE ? "binary" : "text") << 
