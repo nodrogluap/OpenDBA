@@ -138,7 +138,17 @@ Note that the K-means clustering ignores singleton branches in the dendrogram, s
 
 ## Writing FAST5 data
 
-Given a *single* multi-FAST5 OpenDBA will now write the cluster sequence averages (including singletons verbatim) to ```outputprefix.avg.fast5```. This file can then be used as input for basecalling (has been tested with ONT's guppy). Particularly for direct RNA this can be useful, as single read basecall quality is still fairly poor. Averaging multiple sequences at the raw signal level can increase the accuracy of the basecalling as a kind of denoising step. For the moment, of you have multiple FAST5 files you'd like to average at the raw signal level, this must be done as a preprocessing step before you use OpenDBA. 
+Given a *single* multi-FAST5 OpenDBA will now write the cluster sequence averages (including singletons verbatim) to ```outputprefix.avg.fast5```. This file can then be used as input for basecalling (has been tested with ONT's Guppy software). Particularly for direct RNA this can be useful, as single read basecall quality is still fairly poor. Averaging multiple sequences at the raw signal level can increase the accuracy of the basecalling as a kind of denoising step. You must not chop the prefix, and segmentation must be disabled. The following will generate a FAST5 file with a single consensus raw signal from the whole of the test input:
+
+```
+openDBA fast5 float open_end test_out 0 /dev/null 1 test_in.fast5
+```
+
+For the moment, if you have multiple FAST5 files you'd like to average at the raw signal level, this must be done as a preprocessing step before you use OpenDBA. If you expect 13 different transcripts, and you want to output a consensus raw signal for all of them, simply change the clustering parameter:
+
+```
+openDBA fast5 float open_end test_out 0 /dev/null 13 test_in.fast5
+```
 
 ## Finding base modifications and minor fraction variants
 
