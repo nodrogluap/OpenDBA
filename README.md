@@ -31,6 +31,8 @@ make DOUBLE_UNSUPPORTED=1
 ## Quick Start
 First, make sure you have an NVIDIA GPU in your computer.
 
+**Note that the first ('medoid' finding) stage of the DBA algorithm is to compute all-vs-all DTW comparison pairs. While this GPU program is greatly accelerated, I suggest computing the average of less than 5000 sequences, as the O(NxN) comparisons get quite onerous (>25M DTWs) beyond that even on a modern GPU. For truely massive datasets, if subsetting is infeasible, you might want to compute averages in groups of ~5K, then compute the average of the averages in another round of OpenDBA for example.**
+
 If you have up to thousands of text files with one number per line, generate (1) a sequence distance matrix and (2) a consensus sequence using the following command:
 
 ```bash
