@@ -31,6 +31,8 @@ make DOUBLE_UNSUPPORTED=1
 ## Quick Start
 First, make sure you have an NVIDIA GPU in your computer.
 
+**Note that the first ('medoid' finding) stage of the DBA algorithm is to compute all-vs-all DTW comparison pairs. While this GPU program is greatly accelerated, I suggest computing the average of less than 5000 sequences, as the O(NxN) comparisons get quite onerous (>25M DTWs) beyond that even on a modern GPU. For truely massive datasets, if subsetting is infeasible, you might want to compute averages in groups of ~5K, then compute the average of the averages in another round of OpenDBA for example.**
+
 If you have up to thousands of text files with one number per line, generate (1) a sequence distance matrix and (2) a consensus sequence using the following command:
 
 ```bash
@@ -180,6 +182,8 @@ To use these tests, one must have ``R`` installed with the ``multimode`` and ``d
 ## Common Problems &amp; Solutions
 
 If the code does not compile, you may have encountered a bug in CentOS 7's glibc implementation. The solution can be found [here](https://github.com/nodrogluap/OpenDBA/issues/9).
+
+If compiling the code with gcc you get ```error: parameter packs not expanded with '...'```, you have likely run into a bug in CUDA 11.6.0. Please upgrade to CUDA 11.6.4.
 
 If you are parsing a FAST5 file and encounter errors like `could not get ##### Signal from multi FAST5 (HDF5) file`, the file likely contains data using a [vendor-specific compression format called VBZ](https://github.com/nanoporetech/vbz_compression). In this case, you will either need to precompile the dynamically linked HDF5 plugin for decoding it, or have OpenDBA's Makefile do it for you with `make plugins`. This plugin is found at run-time by the HDF5 library by using the environment variable `HDF5_PLUGIN_PATH=/dir/where/you/compiled/libvbz_hdf_plugin.so`, but if you used the OpenDBA make plugins command this will be automatically found by running openDBA through the wrapper script `openDBA.sh`. 
 
