@@ -853,7 +853,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
  *                the length of each member of the ragged array
  */
 template <typename T>
-__host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, int use_open_start, int use_open_end, char *output_prefix, int norm_sequences, double cdist, char** series_file_names, int num_series, int read_mode, cudaStream_t stream=0) {
+__host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, int use_open_start, int use_open_end, char *output_prefix, int norm_sequences, double cdist, char** series_file_names, int num_series, int read_mode, bool is_segmented, cudaStream_t stream=0) {
 
 	// Sanitize the data from potential upstream artifacts or overflow situations
 	for(int i = 0; i < num_sequences; i++){
@@ -1105,15 +1105,15 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
         avgs_file.close();
 	
 #if HDF5_SUPPORTED == 1
-	if(read_mode == FAST5_READ_MODE && num_series == 1){
+	if(is_segmented && read_mode == FAST5_READ_MODE && num_series == 1){
 		std::cerr << "Writing medoids to new fast5 file..." << std::endl;
 		if(writeFast5Output(series_file_names[0], CONCAT2(output_prefix, ".avg.fast5").c_str(), avgNames, avgSequences, avgSeqLengths, num_clusters) == 1){
 			std::cerr << "Cannot write updated sequences to new Fast5 file " << CONCAT2(output_prefix, ".avg.fast5").c_str() << ", aborting." << std::endl;
 			exit(CANNOT_WRITE_UPDATED_FAST5);
 		}
-		cudaFreeHost(avgSequences);		 CUERR("Freeing GPU memory for average sequences");
+		cudaFreeHost(avgSequences);	 CUERR("Freeing GPU memory for average sequences");
 		cudaFreeHost(avgNames);		 CUERR("Freeing GPU memory for average names");
-		cudaFreeHost(avgSeqLengths);		 CUERR("Freeing GPU memory for average lengths");
+		cudaFreeHost(avgSeqLengths);	 CUERR("Freeing GPU memory for average lengths");
 	}		
 #endif
 
