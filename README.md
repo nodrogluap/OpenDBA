@@ -138,6 +138,18 @@ openDBA fast5 float open_end output_prefix 4 direct_rna_leader_float.txt 13 ont_
 
 Note that the K-means clustering ignores singleton branches in the dendrogram, so reduce the odds of overclustering due to errant data you did not expect. This entails that the actual number "K" in K-means may be greater than the K specified on the command line, to accomodate these singletons.  The actual K used is printed in the standard error output to note the final value of K used.
 
+## Barcode demultiplexing
+
+For RNA nanopore data, there is no official barcoding kit. Some users have nonetheless rolled their own using the custom RTA DNA Oligos A and B in the direct ONT RNA sequencing protocol. Because the polymerase motor used to ratchet the RNA through the pore 3'->5' has a particularly slow ratchet effect on the DNA adapter (universal RMX + custom RTA oligos), basecalling barcodes is unreliable. The *de facto* software to demultiplex RNA experiments is [Deeplexicon](https://github.com/Psy-Fer/deeplexicon) using its 4 custom barcodes. OpenDBA has a special open_prefix mode to only compare the first N events in each sequence. For ONT direct RNA experiments, the RMX+RTA leader (minus the RTA Oligo B overhang) is about 98 'bases' long in practice, so the following invocation will approximately cluster by Deeplexicon barcode (4 clusters plus a noise outgroup) as the dominant source of signal distance between otherwise identical leaders:
+
+```
+openDBA fast5 float open_prefix_98 barcode_clustered 4 /dev/null 5 test_in.fast5
+```
+
+Where ```open_prefix_98``` tells it how many segmented event to look at (this can be any positive number for other scenarios). Where 4 is the minimum segment size we've used elsewhere for ONT RNA data. Where 5 is the number of clusters to produce (4 main ones and a noise outgroup). After complete linkage clustering, the segmented signal dendrogram looks like this:
+
+![5 color dendrogram of 4000 segmented signals from a Deeplexicon barcoded ONT direct RNA experiment](docs/prefix_dendrogram.png)
+
 ## Writing FAST5 data
 
 Given a *single* multi-FAST5 OpenDBA will now write the cluster sequence averages (including singletons verbatim) to ```outputprefix.avg.fast5```. This file can then be used as input for basecalling (has been tested with ONT's Guppy software). Particularly for direct RNA this can be useful, as single read basecall quality is still fairly poor. Averaging multiple sequences at the raw signal level can increase the accuracy of the basecalling as a kind of denoising step. You must not chop the prefix, and segmentation must be disabled. The following will generate a FAST5 file with a single consensus raw signal from the whole of the test input:
