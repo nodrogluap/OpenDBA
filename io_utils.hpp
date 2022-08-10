@@ -142,6 +142,91 @@ int writePairDistMatrix(char *output_prefix, char **sequence_names, size_t num_s
 	return 0;
 }
 
+#if SLOW5_SUPPORTED == 1
+
+// Function to take a SLOW5 file and take a selection of sequences from it. The Raw sequence data of the chosen sequences will be replaced with data passed in from the variable "sequences"
+// slow5_file_name - the slow5 file that we will be copying the sequences from
+// new_slow5_file - the name of the new slow5 file where the new data will be written
+// sequence_names - a list of the sequence names found in the slow5 file that will be copied over
+// sequences - the new sequence data that will be written to the new slow5 file
+// sequence_lengths - the lengths of the new sequences. These should equal the lengths of the matching sequences in the original slow5 file
+// num_sequences - the number of new sequences passed in
+// Returns 1 on a fail, 0 on success
+__host__
+int writeSlow5Output(const char* slow5_file_name, const char* new_slow5_file, char** sequence_names, short** sequences, size_t *sequence_lengths, int num_sequences){
+	
+    slow5_file_t *sp = slow5_open(slow5_file_name,"r");
+    if(sp==NULL){
+       std::cerr << "Error opening Slow5 file " << slow5_file_name << " Exiting." << std::endl;
+       return 1;
+    }
+    int ret = slow5_idx_load(sp);
+    if(ret<0){
+       std::cerr << "Error opening Slow5 index file" << slow5_file_name << " Exiting." << std::endl;
+	   return 1;		
+	}	
+	
+    slow5_file_t *sp_new = slow5_open(new_slow5_file, "w");
+    if(sp==NULL){
+		std::cerr << "Error creating new Slow5 file " << new_slow5_file << " Exiting." << std::endl;
+        return 1;
+    }
+	
+	slow5_hdr_t* header_tmp = sp_new->header;
+	sp_new->header = sp->header;
+	
+	
+    if(slow5_hdr_write(sp_new) < 0){
+		std::cerr << "Error writting header to Slow5 file " << new_slow5_file << " Exiting." << std::endl;
+		return 1;	
+	}
+	
+    slow5_rec_t *rec = NULL;
+
+	// Start of reads copy
+	for(int i = 0; i < num_sequences; i++){
+		
+		// Check if sequence exists in original Slow5 file
+		ret = slow5_get(sequence_names[i], &rec, sp);
+		if(ret < 0){
+			std::cerr << "Error. Sequence " << sequence_names[i] << " does not exist in Slow5 file " << slow5_file_name << " Exiting." << std::endl;
+			return 1;
+		}
+			
+		// Get the length of the Raw Signal and check if it matches with the length of the new sequence that will be replacing it
+		if(rec->len_raw_signal != sequence_lengths[i]){
+			std::cerr << "Length of sequence " << sequence_names[i] << " in Slow5 file " << slow5_file_name << " (" << rec->len_raw_signal 
+				  << ") does not match length of sequence given (" << sequence_lengths[i] << ") Exiting." << std::endl;
+			return 1;
+		}	
+
+		for(uint64_t j=0; j < rec->len_raw_signal; j++){
+			rec->raw_signal[j]=sequences[i][j];
+		}
+		
+		//write to file
+		if (slow5_write(rec, sp_new) < 0){
+			std::cerr << "Error writing new sequences to new Slow5 file " << new_slow5_file << " Exiting." << std::endl;
+			return 1;
+		}	
+		
+	}
+
+    slow5_rec_free(rec);
+
+    slow5_idx_unload(sp);
+    slow5_close(sp);	
+
+	sp_new->header=header_tmp;
+	slow5_close(sp_new);
+
+
+	
+	
+	return 0;
+}
+#endif
+
 #if HDF5_SUPPORTED == 1
 
 // Function to take a multi Fast5 file and take a selection of sequences from it. The Raw sequence data of the chosen sequences will be replaced with data passed in from the variable "sequences"
