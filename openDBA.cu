@@ -24,11 +24,14 @@ int main(int argc, char **argv){
 	}
 
 	if(argc < 9){
+		std::cout << "Usage: " << argv[0] << " <binary|text|tsv";
+#if SLOW5_SUPPORTED == 1
+		std::cout << "|slow5";
+#endif	
 #if HDF5_SUPPORTED == 1
-		std::cout << "Usage: " << argv[0] << " <binary|text|tsv|fast5> ";
-#else
-		std::cout << "Usage: " << argv[0] << " <binary|text|tsv> "; 
+		std::cout << "|fast5";
 #endif
+		std::cout << "> ";
 #if DOUBLE_UNSUPPORTED == 1
 		std::cout << "<short|int|uint|ulong|float> " <<
 #else
@@ -44,6 +47,11 @@ int main(int argc, char **argv){
 	if(!strcmp(argv[1],"binary")){
 		read_mode = BINARY_READ_MODE;
 	}
+#if SLOW5_SUPPORTED == 1
+	else if(!strcmp(argv[1],"slow5")){
+		read_mode = SLOW5_READ_MODE;
+	}
+#endif	
 #if HDF5_SUPPORTED == 1
 	else if(!strcmp(argv[1],"fast5")){
 		read_mode = FAST5_READ_MODE;

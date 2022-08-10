@@ -4,3 +4,6 @@
 [submodule "submodules/hclust-cpp"]
 	path = submodules/hclust-cpp
 	url = https://github.com/cdalitz/hclust-cpp
+[submodule "submodules/slow5lib"]
+	path = submodules/slow5lib
+	url = https://github.com/hasindu2008/slow5lib

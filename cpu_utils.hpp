@@ -14,6 +14,11 @@
 #include <algorithm>
 #include <cerrno>
 
+#if SLOW5_SUPPORTED == 1
+#include "submodules/slow5lib/include/slow5/slow5.h"
+#endif
+
+
 #if HDF5_SUPPORTED == 1
 extern "C"{
   #include "hdf5.h"
@@ -127,6 +132,39 @@ read_text_data(const char *text_file_name, T **output_vals, size_t *num_output_v
 	return 0;
 }
 
+#if SLOW5_SUPPORTED == 1
+
+int
+scan_slow5_data(const char *slow5_file_name, size_t *num_sequences){
+
+    slow5_file_t *sp = slow5_open(slow5_file_name,"r");
+    if(sp==NULL){
+       fprintf(stderr,"Error in opening file\n");
+       exit(EXIT_FAILURE);
+    }
+
+    int ret=0;
+    ret = slow5_idx_load(sp);
+    if(ret<0){
+        fprintf(stderr,"Error in loading index\n");
+        exit(EXIT_FAILURE);
+    }
+
+    uint64_t num_reads = 0;
+    char **read_ids = slow5_get_rids(sp, &num_reads);
+    if(read_ids==NULL){
+        fprintf(stderr,"Error in getting list of read IDs\n");
+        exit(EXIT_FAILURE);
+    }
+
+    slow5_idx_unload(sp);
+    slow5_close(sp);
+
+	*num_sequences = num_reads;
+	return 0;
+}
+#endif
+
 #if HDF5_SUPPORTED == 1
 int
 scan_fast5_data(const char *fast5_file_name, size_t *num_sequences){
@@ -192,6 +230,54 @@ scan_tsv_data(const char *tsv_file_name, size_t *num_sequences){
 	*num_sequences = n;
 	return 0;
 }
+
+#if SLOW5_SUPPORTED == 1
+
+template <typename T>
+int
+read_slow5_data(const char *slow5_file_name, T **sequences, char **sequence_names, size_t *sequence_lengths){
+	int local_seq_count_so_far = 0;
+
+    slow5_file_t *sp = slow5_open(slow5_file_name,"r");
+    if(sp==NULL){
+       fprintf(stderr,"Error in opening file\n");
+       return 0;
+    }
+
+    slow5_rec_t *rec = NULL;
+    int ret=0;
+
+    while((ret = slow5_get_next(&rec,sp)) >= 0){
+
+        ssize_t read_length = rec->len_raw_signal;
+		ssize_t name_size = strlen(rec->read_id)+1;
+
+		T *t_seq = 0;
+		cudaMallocManaged(&t_seq, sizeof(T)*read_length);  CUERR("Cannot allocate managed memory for SLOW5 signal");
+		// Convert the SLOW5 raw shorts to the desired datatype from the template
+		for(int j = 0; j < read_length; j++){
+			t_seq[j] = (T) rec->raw_signal[j];
+		}
+		sequences[local_seq_count_so_far] = t_seq;
+		sequence_lengths[local_seq_count_so_far] = read_length;
+		cudaMallocHost(&sequence_names[local_seq_count_so_far], name_size); CUERR("Cannot allocate CPU memory for reading sequence name from SLOW5 file");
+                memcpy(sequence_names[local_seq_count_so_far], rec->read_id, name_size);
+
+		local_seq_count_so_far++;
+    }
+
+    if(ret != SLOW5_ERR_EOF){  //check if proper end of file has been reached
+        fprintf(stderr,"Error in slow5_get_next. Error code %d\n",ret);
+        exit(EXIT_FAILURE);
+    }
+
+    slow5_rec_free(rec);
+    slow5_close(sp);
+
+	return local_seq_count_so_far;
+}
+
+#endif
 
 #if HDF5_SUPPORTED == 1
 template <typename T>
@@ -367,6 +453,55 @@ int readSequenceTSVFiles(char **filenames, int num_files, T ***sequences, char *
 	std::cerr << std::endl;
 	return actual_count;
 }
+
+#if SLOW5_SUPPORTED == 1
+
+template<typename T>
+int readSequenceSLOW5Files(char **filenames, int num_files, T ***sequences, char ***sequence_names, size_t **sequence_lengths){
+
+	std::cerr << "Step 1 of 3: Loading " << num_files << (num_files == 1 ? " S/BLOW5 file" : " S/BLOW5 files");
+
+	// Need two passes: 1st figure out how many sequences there are, then in the 2nd we read the sequences into memory.
+	size_t total_seq_count = 0;
+	for(int i = 0; i < num_files; ++i){
+		size_t seq_count_this_file = 0;
+		scan_slow5_data(filenames[i], &seq_count_this_file);
+		total_seq_count += seq_count_this_file;
+	}
+	std::cerr << ", total sequence count " << total_seq_count << std::endl;
+        std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
+        cudaMallocManaged(sequences, sizeof(T *)*total_seq_count); CUERR("Allocating managed memory for sequence pointers");
+        cudaMallocHost(sequence_names, sizeof(char *)*total_seq_count); CUERR("Allocating CPU memory for sequence lengths");
+        cudaMallocManaged(sequence_lengths, sizeof(size_t)*total_seq_count); CUERR("Allocating managed memory for sequence lengths");
+
+        int dotsPrinted = 0;
+        char spinner[4] = { '|', '/', '-', '\\'};
+	int actual_count = 0;
+        for(int i = 0; i < num_files; ++i){
+                int newDotTotal = 100*((float) i/(num_files-1));
+                if(newDotTotal > dotsPrinted){
+                        for(; dotsPrinted < newDotTotal; dotsPrinted++){
+                                std::cerr << "\b.|";
+                        }
+                }
+                else{
+                        std::cerr << "\b" << spinner[i%4];
+                }
+
+                size_t num_seqs_this_file = read_slow5_data<T>(filenames[i], (*sequences) + actual_count, (*sequence_names) + actual_count, (*sequence_lengths) + actual_count);
+		if(num_seqs_this_file < 1){
+    			std::cerr << "Error reading in SLOW5 file " << filenames[i] << ", skipping" << std::endl;
+		}
+		else{
+			actual_count += num_seqs_this_file;
+		}
+        }
+	if(dotsPrinted < 100){while(dotsPrinted++ < 99){std::cerr << ".";} std::cerr << "|";}
+	std::cerr << std::endl;
+	return actual_count;
+}
+
+#endif
 
 #if HDF5_SUPPORTED == 1
 template<typename T>

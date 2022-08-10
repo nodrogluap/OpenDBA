@@ -22,6 +22,14 @@ make HDF5_SUPPORTED=1
 make tests HDF5_SUPPORTED=1 
 ```
 
+OR, if you plan on using [S/BLOW5 format](https://github.com/hasindu2008/slow5tools) for nanopore data:
+```bash
+git clone --recurse-submodules https://github.com/nodrogluap/OpenDBA/
+cd OpenDBA
+make SLOW5_SUPPORTED=1
+make tests SLOW5_SUPPORTED=1
+```
+
 If you want to run this code on a GPU with Compute Capability less than 6.1 (manufactured before ~2016), you will need to remove the double precision floating point support from openDBA.cu by compiling like so:
 
 ```bash
@@ -85,6 +93,8 @@ By default the desired "convergence delta" is zero.  All of the input sequences 
 ## How do I use this for Oxford Nanopore data?
 
 Although DBA and this software are very broadly applicable to time series in various domains of study, one of the main motivations for developing an open end DBA implementation is the clustering and consensus analysis of direct RNA data from [Oxford Nanopore Technologies](https://nanoporetech.com/applications/rna-sequencing) devices. The raw 3000 or 4000Hz picoamperage sample measurements are stored in a dialect of [HDF5](https://www.hdfgroup.org/solutions/hdf5/) files called FAST5. By default, OpenDBA does not require HDF5 support to compile, and therefore does not process FAST5 files by default.  To enable FAST5 input file support, install the HDF5 libraries on your machine (e.g. using yum or apt-get), then compile OpenDBA with ```make HDF5_SUPPORTED=1```. That should do it! If your package manager installs HDF5 in a weird place and you get compiler messages like ```fatal error: hdf5.h: No such file or directory```, hunt down where the package manager installed HDF5 and adjust the make command accordingly such as ```make HDF5_SUPPORTED=1 CPATH=/usr/include/hdf5/serial LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial``` on a DGX workstation.
+
+Alternatively, you can use [slow5tools](https://github.com/hasindu2008/slow5tools) to convert your FAST5 files to S/BLOW5 and use openDBA on such files by compiling openDBA with ```make SLOW5_SUPPORTED=1```
 
 Now we can do a multiple alignment of the raw signals using DBA to generate a consensus signal, and a distance matrix for cluster analysis like in the previous sections.
 
