@@ -47,9 +47,9 @@ TEST_CASE( " Write Slow5 Output " ){
 	std::string series_filename_seq = current_working_dir + "/good_files/slow5/FAN41461_pass_496845aa_0.blow5";
 	std::string slow5_output = current_working_dir + "/test_output.blow5";
 	
-	std::string good_file = current_working_dir + "/good_files/tsv/openDBA_test_edit_fast5.tsv";	
-	std::string wrong_size_file = current_working_dir + "/wrong_files/tsv/openDBA_test_size_fast5.tsv";
-	std::string wrong_name_file = current_working_dir + "/wrong_files/tsv/openDBA_test_name_fast5.tsv";
+	std::string good_file = current_working_dir + "/good_files/tsv/openDBA_test_edit_slow5.tsv";	
+	std::string wrong_size_file = current_working_dir + "/wrong_files/tsv/openDBA_test_size_slow5.tsv";
+	std::string wrong_name_file = current_working_dir + "/wrong_files/tsv/openDBA_test_name_slow5.tsv";
 	
 	char** filenames = (char**)malloc(sizeof(char*)*4);
 	filenames[0] = stringToChar(good_file);

@@ -187,7 +187,7 @@ int writeSlow5Output(const char* slow5_file_name, const char* new_slow5_file, ch
 	for(int i = 0; i < num_sequences; i++){
 		
 		// Check if sequence exists in original Slow5 file
-		ret = slow5_get("r3", &rec, sp);
+		ret = slow5_get(sequence_names[i], &rec, sp);
 		if(ret < 0){
 			std::cerr << "Error. Sequence " << sequence_names[i] << " does not exist in Slow5 file " << slow5_file_name << " Exiting." << std::endl;
 			return 1;
