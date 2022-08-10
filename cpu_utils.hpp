@@ -139,22 +139,22 @@ scan_slow5_data(const char *slow5_file_name, size_t *num_sequences){
 
     slow5_file_t *sp = slow5_open(slow5_file_name,"r");
     if(sp==NULL){
-       fprintf(stderr,"Error in opening file\n");
-       exit(EXIT_FAILURE);
+       std::cerr << "Could not open SLOW5 file " << slow5_file_name << std::endl;
+       return SLOW5_FILE_UNREADABLE;
     }
 
     int ret=0;
     ret = slow5_idx_load(sp);
     if(ret<0){
-        fprintf(stderr,"Error in loading index\n");
-        exit(EXIT_FAILURE);
+       std::cerr << "Could not open SLOW5 file index for " << slow5_file_name << std::endl;
+       return SLOW5_FILE_UNREADABLE;
     }
 
     uint64_t num_reads = 0;
     char **read_ids = slow5_get_rids(sp, &num_reads);
     if(read_ids==NULL){
-        fprintf(stderr,"Error in getting list of read IDs\n");
-        exit(EXIT_FAILURE);
+       std::cerr << "Could not get number of reads from SLOW5 file " << slow5_file_name << std::endl;
+	   return SLOW5_FILE_UNREADABLE;	
     }
 
     slow5_idx_unload(sp);
@@ -239,8 +239,7 @@ read_slow5_data(const char *slow5_file_name, T **sequences, char **sequence_name
 	int local_seq_count_so_far = 0;
 
     slow5_file_t *sp = slow5_open(slow5_file_name,"r");
-    if(sp==NULL){
-       fprintf(stderr,"Error in opening file\n");
+    if(sp==NULL){ // No message, assume scan function called earlier provided these
        return 0;
     }
 
@@ -267,8 +266,8 @@ read_slow5_data(const char *slow5_file_name, T **sequences, char **sequence_name
     }
 
     if(ret != SLOW5_ERR_EOF){  //check if proper end of file has been reached
-        fprintf(stderr,"Error in slow5_get_next. Error code %d\n",ret);
-        exit(EXIT_FAILURE);
+		std::cerr << "Error in slow5_get_next: Error code " << ret << std::endl;
+	    return SLOW5_FILE_UNREADABLE;
     }
 
     slow5_rec_free(rec);

@@ -46,11 +46,11 @@ plugins: vendor/plugins/vbz_compression/build/bin/libvbz_hdf_plugin.so
 tests/openDBA_test.o: tests/openDBA_test.cu openDBA.cuh segmentation.hpp cpu_utils.hpp gpu_utils.hpp io_utils.hpp exit_codes.hpp read_mode_codes.h dtw.hpp dba.hpp limits.hpp cuda_utils.hpp
 	nvcc -DCUB_IGNORE_DEPRECATED_CPP_DIALECT -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DSLOW5_SUPPORTED=$(SLOW5_SUPPORTED)  -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) -c $< -o $@
 
-tests/openDBA_test: tests/openDBA_test.cu tests/openDBA_test.o multithreading.o submodules/hclust-cpp/fastcluster.o
-	nvcc $(NVCC_FLAGS) --compiler-options "-fPIC -no-pie" tests/openDBA_test.o multithreading.o submodules/hclust-cpp/fastcluster.o -o tests/openDBA_test
+tests/openDBA_test: tests/openDBA_test.cu tests/openDBA_test.o multithreading.o submodules/hclust-cpp/fastcluster.o $(LIBS) 
+	nvcc $(NVCC_FLAGS) --compiler-options "-fPIC -no-pie" tests/openDBA_test.o multithreading.o submodules/hclust-cpp/fastcluster.o $(LIBS) -o tests/openDBA_test
 	
-tests/io_utils_test: tests/io_utils_test.cu io_utils.hpp cpu_utils.hpp multithreading.o
-	nvcc -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DSLOW5_SUPPORTED=$(SLOW5_SUPPORTED)  -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) --compiler-options "-fPIC -no-pie" $< multithreading.o -o $@
+tests/io_utils_test: tests/io_utils_test.cu io_utils.hpp cpu_utils.hpp multithreading.o $(LIBS) 
+	nvcc -DDEBUG=$(DEBUG) -DDOUBLE_UNSUPPORTED=$(DOUBLE_UNSUPPORTED) -DSLOW5_SUPPORTED=$(SLOW5_SUPPORTED)  -DHDF5_SUPPORTED=$(HDF5_SUPPORTED) $(NVCC_FLAGS) --compiler-options "-fPIC -no-pie" $< multithreading.o $(LIBS) -o $@
 
 tests: tests/openDBA_test tests/io_utils_test
 	cd tests; ./openDBA_test ; ./io_utils_test
