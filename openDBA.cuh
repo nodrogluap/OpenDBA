@@ -24,6 +24,12 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	if(read_mode == BINARY_READ_MODE){ actual_num_series = readSequenceBinaryFiles<T>(series_file_names, num_series, &sequences, &sequence_names, &sequence_lengths, is_short); }
 	// In the following two the sequence names are from inside the file, not the file names themselves
 	else if(read_mode == TSV_READ_MODE){ actual_num_series = readSequenceTSVFiles<T>(series_file_names, num_series, &sequences, &sequence_names, &sequence_lengths); }
+#if SLOW5_SUPPORTED == 1
+	else if(read_mode == SLOW5_READ_MODE){
+		actual_num_series = readSequenceSLOW5Files<T>(series_file_names, num_series, &sequences, &sequence_names, &sequence_lengths);
+		writeSequences(sequences, sequence_lengths, sequence_names, actual_num_series, CONCAT2(output_prefix, ".seqs.txt").c_str());
+	}
+#endif	
 #if HDF5_SUPPORTED == 1
 	else if(read_mode == FAST5_READ_MODE){ 
 		actual_num_series = readSequenceFAST5Files<T>(series_file_names, num_series, &sequences, &sequence_names, &sequence_lengths); 

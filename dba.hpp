@@ -940,7 +940,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
                 exit(CANNOT_WRITE_DBA_AVG);
         }
 
-#if HDF5_SUPPORTED == 1
+#if HDF5_SUPPORTED == 1 || SLOW5_SUPPORTED == 1
 	short **avgSequences = 0;
 	char **avgNames = 0;
 	size_t *avgSeqLengths = 0;
@@ -963,7 +963,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		if(num_members == 1){
 			std::cerr << "Outputting singleton sequence " << sequence_names[medoidIndices[currCluster]] << 
 				     " as-is (a.k.a. cluster " << (currCluster+1) << "/" << num_clusters << ")." << std::endl;
-#if HDF5_SUPPORTED == 1	
+#if HDF5_SUPPORTED == 1 || SLOW5_SUPPORTED == 1
 			cudaMallocHost(&(avgSequences[currCluster]), sizeof(short)*medoidLength);		 CUERR("Allocating GPU memory for single average sequence");
 #endif	
 			avgs_file << sequence_names[medoidIndices[currCluster]];
@@ -974,7 +974,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
                         	double seqStdDev = sequence_sigmas[medoidIndices[currCluster]];
         			for (size_t i = 0; i < medoidLength; ++i) { 
                                         avgs_file << "\t" << ((T) (seqAvg+seq[i]*seqStdDev));
-#if HDF5_SUPPORTED == 1					
+#if HDF5_SUPPORTED == 1 || SLOW5_SUPPORTED == 1				
 					avgSequences[currCluster][i] = (short)(seqAvg+seq[i]*seqStdDev);
 #endif				
 				}
@@ -982,14 +982,14 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 			else{
 				for (size_t i = 0; i < medoidLength; ++i) {
                                         avgs_file << "\t" << seq[i];
-#if HDF5_SUPPORTED == 1				
+#if HDF5_SUPPORTED == 1 || SLOW5_SUPPORTED == 1			
 					avgSequences[currCluster][i] = (short)(seq[i]);
 #endif				
 				}
 			}
 			avgs_file << std::endl;
 			
-#if HDF5_SUPPORTED == 1
+#if HDF5_SUPPORTED == 1 || SLOW5_SUPPORTED == 1
 			// Populate average buffers for writing fast5 output
 			avgNames[currCluster] = sequence_names[medoidIndices[currCluster]];
 			avgSeqLengths[currCluster] = medoidLength;
@@ -1083,7 +1083,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		}
 		avgs_file << std::endl;
 		
-#if HDF5_SUPPORTED == 1
+#if HDF5_SUPPORTED == 1 || SLOW5_SUPPORTED == 1
 		// Populate medoid buffers for writing fast5 output
 		avgNames[currCluster] = sequence_names[medoidIndices[currCluster]];
 		avgSeqLengths[currCluster] = medoidLength;
@@ -1109,6 +1109,19 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		if(writeFast5Output(series_file_names[0], CONCAT2(output_prefix, ".avg.fast5").c_str(), avgNames, avgSequences, avgSeqLengths, num_clusters) == 1){
 			std::cerr << "Cannot write updated sequences to new Fast5 file " << CONCAT2(output_prefix, ".avg.fast5").c_str() << ", aborting." << std::endl;
 			exit(CANNOT_WRITE_UPDATED_FAST5);
+		}
+		cudaFreeHost(avgSequences);	 CUERR("Freeing GPU memory for average sequences");
+		cudaFreeHost(avgNames);		 CUERR("Freeing GPU memory for average names");
+		cudaFreeHost(avgSeqLengths);	 CUERR("Freeing GPU memory for average lengths");
+	}		
+#endif
+
+#if SLOW5_SUPPORTED == 1
+	if(is_segmented && read_mode == SLOW5_READ_MODE && num_series == 1){
+		std::cerr << "Writing medoids to new slow5 file..." << std::endl;
+		if(writeSlow5Output(series_file_names[0], CONCAT2(output_prefix, ".avg.blow5").c_str(), avgNames, avgSequences, avgSeqLengths, num_clusters) == 1){
+			std::cerr << "Cannot write updated sequences to new Fast5 file " << CONCAT2(output_prefix, ".avg.blow5").c_str() << ", aborting." << std::endl;
+			exit(CANNOT_WRITE_UPDATED_SLOW5);
 		}
 		cudaFreeHost(avgSequences);	 CUERR("Freeing GPU memory for average sequences");
 		cudaFreeHost(avgNames);		 CUERR("Freeing GPU memory for average names");

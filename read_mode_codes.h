@@ -7,5 +7,8 @@
 #if HDF5_SUPPORTED == 1
 #define FAST5_READ_MODE 3
 #endif
+#if SLOW5_SUPPORTED == 1
+#define SLOW5_READ_MODE 4
+#endif
 
 #endif

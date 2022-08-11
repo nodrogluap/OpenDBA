@@ -22,6 +22,14 @@ make HDF5_SUPPORTED=1
 make tests HDF5_SUPPORTED=1 
 ```
 
+OR, if you plan on using [S/BLOW5 format](https://github.com/hasindu2008/slow5tools) for nanopore data:
+```bash
+git clone --recurse-submodules https://github.com/nodrogluap/OpenDBA/
+cd OpenDBA
+make SLOW5_SUPPORTED=1
+make tests SLOW5_SUPPORTED=1
+```
+
 If you want to run this code on a GPU with Compute Capability less than 6.1 (manufactured before ~2016), you will need to remove the double precision floating point support from openDBA.cu by compiling like so:
 
 ```bash
@@ -86,22 +94,27 @@ By default the desired "convergence delta" is zero.  All of the input sequences 
 
 Although DBA and this software are very broadly applicable to time series in various domains of study, one of the main motivations for developing an open end DBA implementation is the clustering and consensus analysis of direct RNA data from [Oxford Nanopore Technologies](https://nanoporetech.com/applications/rna-sequencing) devices. The raw 3000 or 4000Hz picoamperage sample measurements are stored in a dialect of [HDF5](https://www.hdfgroup.org/solutions/hdf5/) files called FAST5. By default, OpenDBA does not require HDF5 support to compile, and therefore does not process FAST5 files by default.  To enable FAST5 input file support, install the HDF5 libraries on your machine (e.g. using yum or apt-get), then compile OpenDBA with ```make HDF5_SUPPORTED=1```. That should do it! If your package manager installs HDF5 in a weird place and you get compiler messages like ```fatal error: hdf5.h: No such file or directory```, hunt down where the package manager installed HDF5 and adjust the make command accordingly such as ```make HDF5_SUPPORTED=1 CPATH=/usr/include/hdf5/serial LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial``` on a DGX workstation.
 
+Alternatively, you can use [slow5tools](https://github.com/hasindu2008/slow5tools) to convert your FAST5 files to S/BLOW5 and use openDBA on such files by compiling openDBA with ```make SLOW5_SUPPORTED=1```
+
 Now we can do a multiple alignment of the raw signals using DBA to generate a consensus signal, and a distance matrix for cluster analysis like in the previous sections.
 
 ```bash
 openDBA fast5 float open_end output_prefix 0 /dev/null 1 ont_folder_name/*.fast5
+openDBA slow5 float open_end output_prefix 0 /dev/null 1 slow5_folder_name/*.blow5 #or *.slow5
 ```
 
 OpenDBA has a built-in CUDA accelerated unimodal segmentation algorithm. To segment direct RNA signal data from ONT into dwell "events" type:
 
 ```bash
 openDBA fast5 float open_end output_prefix 6 /dev/null 1 ont_folder_name/*.fast5
+openDBA slow5 float open_end output_prefix 6 /dev/null 1 slow5_folder_name/*.blow5 #or *.slow5
 ```
 
 Where 6 is a hint to the segmenter as to how big spurious events caused by sensor noise can be (5 in this case).  The repository also includes a consensus leader sequencing adapter signal for ONT RNA experiments, so this can be chopped off the start of the inputs by replacing the /dev/null argument on the command line:
 
 ```bash
 openDBA fast5 float open_end output_prefix 4 direct_rna_leader_float.txt 1 ont_folder_name/*.fast5
+openDBA slow5 float open_end output_prefix 4 direct_rna_leader_float.txt 1 slow5_folder_name/*.blow5 #or *.slow5
 ```
 
 Below is an example of three nanopore picoamperage signals for a viral RNA sequence (i.e. three partial copies of the virus genome going through different sensors on the device at different times). By using an open-end DTW alignment, the fact that genome fragments are of different length *and information content at the end* does not adversely affect the consensus building. The time dimension compressions and dilations (i.e. time warp due to variation in the motor protein ratcheting rate) within the shared signal section are obvious when you mentally align large peaks and valley in the middle of the graphs.
@@ -134,9 +147,23 @@ When the value is greater than 1, the integer value is taken and used to perform
 
 ```bash
 openDBA fast5 float open_end output_prefix 4 direct_rna_leader_float.txt 13 ont_folder_name/*.fast5
+openDBA slow5 float open_end output_prefix 4 direct_rna_leader_float.txt 13 slow5_folder_name/*.blow5 #or *.slow5
 ```
 
 Note that the K-means clustering ignores singleton branches in the dendrogram, so reduce the odds of overclustering due to errant data you did not expect. This entails that the actual number "K" in K-means may be greater than the K specified on the command line, to accomodate these singletons.  The actual K used is printed in the standard error output to note the final value of K used.
+
+## Barcode demultiplexing
+
+For RNA nanopore data, there is no official barcoding kit. Some users have nonetheless rolled their own using the custom RTA DNA Oligos A and B in the direct ONT RNA sequencing protocol. Because the polymerase motor used to ratchet the RNA through the pore 3'->5' has a particularly slow ratchet effect on the DNA adapter (universal RMX + custom RTA oligos), basecalling barcodes is unreliable. The *de facto* software to demultiplex RNA experiments is [Deeplexicon](https://github.com/Psy-Fer/deeplexicon) using its 4 custom barcodes. OpenDBA has a special open_prefix mode to only compare the first N events in each sequence. For ONT direct RNA experiments, the RMX+RTA leader (minus the RTA Oligo B overhang) is about 98 'bases' long in practice, so the following invocation will approximately cluster by Deeplexicon barcode (4 clusters plus a noise outgroup) as the dominant source of signal distance between otherwise identical leaders:
+
+```
+openDBA fast5 float open_prefix_98 barcode_clustered 4 /dev/null 5 test_in.fast5
+openDBA slow5 float open_prefix_98 barcode_clustered 4 /dev/null 5 test_in.blow5 #or *.slow5
+```
+
+Where ```open_prefix_98``` tells it how many segmented event to look at (this can be any positive number for other scenarios). Where 4 is the minimum segment size we've used elsewhere for ONT RNA data. Where 5 is the number of clusters to produce (4 main ones and a noise outgroup). After complete linkage clustering, the segmented signal dendrogram looks like this:
+
+![5 color dendrogram of 4000 segmented signals from a Deeplexicon barcoded ONT direct RNA experiment](docs/prefix_dendrogram.png)
 
 ## Writing FAST5 data
 
@@ -152,12 +179,28 @@ For the moment, if you have multiple FAST5 files you'd like to average at the ra
 openDBA fast5 float open_end test_out 0 /dev/null 13 test_in.fast5
 ```
 
+## Writing BLOW5 data
+
+Given a *single* S/BLOW5 file OpenDBA will now write the cluster sequence averages (including singletons verbatim) to ```outputprefix.avg.blow5```. This file can then be used as input for basecalling (using SLOW5 [Guppy Wrapper](https://github.com/Psy-Fer/buttery-eel)). The following will generate a S/BLOW5 file with a single consensus raw signal from the whole of the test input:
+
+```
+openDBA slow5 float open_end test_out 0 /dev/null 1 test_in.blow5 #or .slow5
+```
+
+For the moment, if you have multiple S/BLOW5 files you'd like to average at the raw signal level, you can create a single BLOW5 file using [slow5tools merge](https://github.com/hasindu2008/slow5tools). If you expect 13 different transcripts, and you want to output a consensus raw signal for all of them, simply change the clustering parameter:
+
+```
+openDBA slow5 float open_end test_out 0 /dev/null 13 test_in.blow5 #or .slow5
+```
+
+
 ## Finding base modifications and minor fraction variants
 
 Preliminary support for identifying variants or base modifications that affect nanopore signal is provided by the rna_multimodality.sh script. After an OpenDBA run, any generated transcript cluster can be tested for positions where the picoamperage across all cluster reads appears to be multimodal. By default Hartigans' Dip Test is used as a highly precise estimate (low false positive rate), then [Kernel Density Estimation + Excess Mass](https://link.springer.com/article/10.1007/s11749-018-0611-5) as a high recall estimate (low false negative rate). The script takes two arguments, the length of the reference RNA (e.g. 29903 for SARS-CoV-2 direct RNA data) for position reporting, and the cluster prefix. In the case below, we generate 30 clusters, and decide to look at the multimodality of consensus sites using the reads in cluster 14
 
 ```bash
 openDBA fast5 float open_end myexperiment 4 direct_rna_leader_float.txt 30 ont_folder_name/*.fast5
+openDBA slow5 float open_end myexperiment 4 direct_rna_leader_float.txt 30 slow5_folder_name/*.blow5 #or *.slow5
 sh rna_multimodality.sh 29903 myexperiment.14
 ```
 yields two files ``myexperiment.14.multimodal.diptest.txt`` and ``myexperiment.14.multimodal.kde_smoothing_plus_excess_mass.txt``...
