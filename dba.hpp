@@ -25,6 +25,7 @@
 #include "limits.hpp" // for CUDA kernel compatible max()
 #include "submodules/hclust-cpp/fastcluster.h"
 #include "read_mode_codes.h"
+#include "mem_export.h" // for in - memory model of dba result for return to programmatic callers to performDBA()
 
 using namespace cudahack; // for device-side numeric limits
 
@@ -853,7 +854,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
  *                the length of each member of the ragged array
  */
 template <typename T>
-__host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, int use_open_start, int use_open_end, char *output_prefix, int norm_sequences, double cdist, char** series_file_names, int num_series, int read_mode, bool is_segmented, cudaStream_t stream=0) {
+__host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, int use_open_start, int use_open_end, char *output_prefix, int norm_sequences, double cdist, char** series_file_names, int num_series, int read_mode, bool is_segmented, dba_result<T> *result, cudaStream_t stream=0) {
 
 	// Sanitize the data from potential upstream artifacts or overflow situations
 	for(int i = 0; i < num_sequences; i++){
