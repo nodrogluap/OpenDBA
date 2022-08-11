@@ -340,7 +340,7 @@ __global__ void adaptive_device_segmentation(T **all_series, size_t *all_series_
 template<typename T>
 __host__ void
 adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_segment_length,
-                      T ***segmented_sequences, size_t **segmented_seq_lengths, cudaStream_t stream = 0) {
+                      T ***segmented_sequences, size_t **segmented_seq_lengths, int prefix_length_to_skip, cudaStream_t stream = 0) {
 
 	// If a real sequence segment was split over two sample averaging windows, we need to ensure that the window is 1/3 (or less) of the segment length so
 	// as to get a representative median of that segment in at least one window.
@@ -554,15 +554,27 @@ adaptive_segmentation(T **sequences, size_t *seq_lengths, int num_seqs, int min_
 
 		}
 		// Set the reported segments total for the seq to reflect the adaptive segmentation results.
-		// In rare instances with a tiny amount of final block index data, you end up sqrt(max) a  
+		// In rare instances with a tiny amount of final block index data, you can end up with sqrt(max) avg that we should ignore.
 		if(segmented_sequence[cursor-1] >= std::numeric_limits<T>::max()/2){
 			cursor--;
+		}
+
+		int prefix_length_skipped = 0;
+		if(prefix_length_to_skip){
+			if(cursor <= prefix_length_to_skip){ // We've been asked to skip more sequence elements than exist, provide the bare minimum (should be removed/ignored by caller).
+				prefix_length_skipped = cursor - 1;
+				cursor = 1;
+			}
+			else{
+				prefix_length_skipped = prefix_length_to_skip;
+				cursor -= prefix_length_to_skip;
+			}
 		}
 		(*segmented_seq_lengths)[i] = cursor;
 
 		// Now that we know the real length, allocate the final memory for the sequence (so later we can free up the big block we wrote to in bulk)
 		cudaMallocManaged(&(*segmented_sequences)[i], sizeof(T)*cursor); CUERR("Allocating managed memory for a segmented sequence");
-		cudaMemcpyAsync((*segmented_sequences)[i], segmented_sequence, sizeof(T)*cursor, cudaMemcpyHostToHost, stream); CUERR("Copying a segmented sequence to managed memory");
+		cudaMemcpyAsync((*segmented_sequences)[i], &segmented_sequence[prefix_length_skipped], sizeof(T)*cursor, cudaMemcpyHostToHost, stream); CUERR("Copying a segmented sequence to managed memory");
 	}
 	cudaStreamSynchronize(stream); CUERR("Synchronizing stream after segemented sequence copy to managed memory");// ensure all the copying had finished before freeing the original results
 	cudaFreeHost(padded_segmented_sequences); CUERR("Freeing managed memory for segmented sequence pointers");
