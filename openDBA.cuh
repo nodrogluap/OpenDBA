@@ -113,7 +113,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	}
 
 	// Step 3. The meat of this meal!
-	performDBA<T>(sequences, actual_num_series, sequence_lengths, sequence_names, use_open_start, use_open_end, output_prefix, norm_sequences, cdist, series_file_names, num_series, read_mode, min_segment_length < 1);
+	performDBA<T>(sequences, actual_num_series, sequence_lengths, sequence_names, use_open_start, use_open_end, output_prefix, norm_sequences, cdist, series_file_names, num_series, read_mode, min_segment_length < 1, (dba_result<T> *) 0);
 
 	// Cleanup
 	for (int i = 0; i < actual_num_series; i++){ 
