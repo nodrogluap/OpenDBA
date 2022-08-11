@@ -906,11 +906,10 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 
 	cudaStreamSynchronize(stream); CUERR("Synchronizing the CUDA stream after sequences' copy to GPU");
         // Pick a seed sequence from the original input, with the smallest L2 norm (residual sum of squares).
-	setupPercentageDisplay(CONCAT2("Step 2 of 3: Finding initial ",(cdist < 1 ? "clusters and medoids" : "medoid")));
-	//int sequences_membership[] = {0, 0, 0};
+	setupPercentageDisplay(CONCAT2("Step 2 of 3: Finding initial ",(cdist != 1 ? "clusters and medoids" : "medoid")));
 	int* sequences_membership = new int[num_sequences];
-	//int medoidIndices[] = {0}; //approximateMedoidIndices(gpu_sequences, maxLength, num_sequences, sequence_lengths, sequence_names, use_open_start, use_open_end, output_prefix, &cdist, sequences_membership, stream);
-	int *medoidIndices = approximateMedoidIndices(gpu_sequences, maxLength, num_sequences, sequence_lengths, sequence_names, use_open_start, use_open_end, output_prefix, &cdist, sequences_membership, stream);
+	int *medoidIndices = approximateMedoidIndices(gpu_sequences, maxLength, num_sequences, sequence_lengths, sequence_names, use_open_start, use_open_end, output_prefix, 
+			                              &cdist, sequences_membership, stream);
 	teardownPercentageDisplay();	
 	// Don't need the full complement of evenly space sequences again.
 	cudaFree(gpu_sequences); CUERR("Freeing CPU memory for GPU sequence data");

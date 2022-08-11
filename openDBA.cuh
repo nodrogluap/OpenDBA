@@ -12,7 +12,7 @@
 
 template<typename T>
 void
-setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length, int norm_sequences, double cdist, bool is_short=false){
+setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length, int norm_sequences, double cdist, const int prefix_start, const int prefix_length, bool is_short=false){
 	size_t *sequence_lengths = 0;
 	T **segmented_sequences = 0;
 	size_t *segmented_seq_lengths = 0;
@@ -67,22 +67,36 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 	// Step 2. If a minimum segment length was provided, segment the input sequences into unimodal pieces. 
 	if(min_segment_length > 0){
 		setupPercentageDisplay("Opt-in Step: Segmenting with minimum acceptable segment size of " + std::to_string(min_segment_length));
-		adaptive_segmentation<T>(sequences, sequence_lengths, actual_num_series, min_segment_length, &segmented_sequences, &segmented_seq_lengths);
+		adaptive_segmentation<T>(sequences, sequence_lengths, actual_num_series, min_segment_length, &segmented_sequences, &segmented_seq_lengths, prefix_start);
 		teardownPercentageDisplay();
+		int num_seqs_removed = 0;
 		for (int i = 0; i < actual_num_series; i++){ 
 			cudaFree(sequences[i]); CUERR("Freeing managed memory for a presegmentation sequence");
-			// Sequences of length 1 are problematic as there is no meaningful warp to be performed, and they are almost certain to become the initial medoid.
+			// 1. Sequences of length 1 are problematic as there is no meaningful warp to be performed, and they are almost certain to become the initial medoid.
 			// We therefore eliminate them.
-			if(segmented_seq_lengths[i] < 2){
-				std::cerr << "Removing segmented sequence '" << sequence_names[i] << "' of length " << segmented_seq_lengths[i]
-					  << " as it may unduly skew the convergence process. To retain this sequence, consider setting a smaller minimum segment size (currently " 
-					  << min_segment_length << ")" << std::endl;
-				cudaFree(segmented_sequences[i]); CUERR("Freeing managed memory for a discarded post-segmentation sequence");
-				for (int j = i + 1; j < actual_num_series; j++){ 
+			if(segmented_seq_lengths[i-num_seqs_removed] < 2 || prefix_length > 0 && segmented_seq_lengths[i-num_seqs_removed] < prefix_length){
+				cudaFree(segmented_sequences[i-num_seqs_removed]); CUERR("Freeing managed memory for a discarded post-segmentation sequence");
+				for (int j = i - num_seqs_removed + 1; j < actual_num_series; j++){ 
 					segmented_sequences[j-1] = segmented_sequences[j]; // TODO: use memmove() instead?
 					segmented_seq_lengths[j-1] = segmented_seq_lengths[j];
 				}
-				actual_num_series--;
+				num_seqs_removed++;
+			}
+		}
+		if(num_seqs_removed){
+			std::cerr << "Removing " << num_seqs_removed << " segmented sequences that are too short, as they may unduly skew the convergence process. "
+				  << "To retain more sequences, consider setting a smaller minimum segment size (currently " 
+				  << min_segment_length << ")" << std::endl;
+			actual_num_series -= num_seqs_removed;
+			if(actual_num_series < 2){
+				std::cerr << "At least two sequences must be survive segmentation filters calculate an average, but found " << actual_num_series << ", aborting" << std::endl;
+				exit(NOT_ENOUGH_SEQUENCES);
+			}
+		}
+		// 2. Artificially set all the sequence lengths to the requested length for inspection (alignment).
+		if(prefix_length > 0){
+			for (int i = 0; i < actual_num_series; i++){
+				segmented_seq_lengths[i] = prefix_length; 
 			}
 		}
 		writeSequences(segmented_sequences, segmented_seq_lengths, sequence_names, actual_num_series, CONCAT2(output_prefix, ".segmented_seqs.txt").c_str());

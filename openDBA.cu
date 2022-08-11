@@ -4,12 +4,16 @@
  * Warp Barycenter Averaging algorithm as conceived (without parallel compuation conception) by Francois Petitjean 
  ******************************************************************************/
 
+#include <string>
+#include <vector>
 #include "openDBA.cuh"
 
 __host__
 int main(int argc, char **argv){
 	
-	int norm_sequences = 1;
+	int norm_sequences = 1; // signal range
+	int prefix_to_skip = 0; // where do we start looking for a prefix when in open_prefix mode?
+	int prefix_length = 0; // if non-zero, look only at the first N segments after prefix_to_skip for alignment
 	
 	char c;
 	while( ( c = getopt (argc, argv, "n") ) != -1 ) {
@@ -66,6 +70,25 @@ int main(int argc, char **argv){
         }
         else if(!strcmp(argv[3],"open_end")){
 		use_open_end = 1;
+	}
+	// In format open_prefix_#_# where the numbers are the start and end of the segmented sequence positions to inspect
+	else if(!strncmp(argv[3],"open_prefix", 11)){
+	       	use_open_start = 0;
+	       	use_open_end = 1;
+		norm_sequences = 1; // TODO: quantile norm when set to 2? 
+		std::stringstream ss(std::string(argv[3]+12));
+		std::vector <std::string> fields;
+		std::string tmp;
+		while(std::getline(ss, tmp, '_')){
+    			fields.push_back(tmp);
+		}
+		if(fields.size() != 2){
+			std::cerr << "Unexpected alignment type specified, expected open_prefix_##_## but did not find a second underscore in " << argv[3] << std::endl;
+			exit(1);
+		}
+		prefix_to_skip = std::stoi(fields[0]);
+		prefix_length = std::stoi(fields[1]);
+		std::cerr << "Aligning only the first " << prefix_length << " elements of each sequence" << std::endl;
         }
 	else if(!strcmp(argv[3],"open")){
 		use_open_start = 1;
@@ -88,27 +111,27 @@ int main(int argc, char **argv){
 	int argind = 8; // Where the file names start
 	// The following are all the data types supported by CUDA's atomicAdd() operation, so we support them too for best value precision maintenance.
 	if(!strcmp(argv[2],"int")){
-		setupAndRun<int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
+		setupAndRun<int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist, prefix_to_skip, prefix_length);
 	}
 	else if(!strcmp(argv[2],"uint")){
-		setupAndRun<unsigned int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
+		setupAndRun<unsigned int>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist, prefix_to_skip, prefix_length);
 	}
 	else if(!strcmp(argv[2],"ulong")){
-		setupAndRun<unsigned long long>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
+		setupAndRun<unsigned long long>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist, prefix_to_skip, prefix_length);
 	}
 	else if(!strcmp(argv[2],"float")){
-		setupAndRun<float>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
+		setupAndRun<float>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist, prefix_to_skip, prefix_length);
 	}
 	// Only since CUDA 6.1 (Pascal and later architectures) is atomicAdd(double *...) supported.  Remove if you want to compile for earlier graphics cards.
 #if DOUBLE_UNSUPPORTED == 1
 #else
 	else if(!strcmp(argv[2],"double")){
-		setupAndRun<double>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist);
+		setupAndRun<double>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist, prefix_to_skip, prefix_length);
 	}
 #endif
 	else if(!strcmp(argv[2], "short")){
 		// Short is not properly supported in the hardware nor by z-normalization, we will convert to float  (last arg=1)
-		setupAndRun<float>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist, 1);
+		setupAndRun<float>(seqprefix_filename, &argv[argind], num_series, output_prefix, read_mode, use_open_start, use_open_end, min_segment_length, norm_sequences, cdist, prefix_to_skip, prefix_length, 1);
 	}
 	else{
 		std::cerr << "Second argument (" << argv[2] << ") was not one of the accepted numerical representations: 'int', 'uint', 'ulong', 'float' or 'double'" << std::endl;
@@ -116,5 +139,10 @@ int main(int argc, char **argv){
 	}
 
 	// Following needed to allow cuda-memcheck to detect memory leaks
-	cudaDeviceReset(); CUERR("Resetting GPU device");
+	int deviceCount;
+        cudaGetDeviceCount(&deviceCount); CUERR("Getting GPU device count in teardown/cleanup");
+	for(int i = 0; i < deviceCount; i++){
+                cudaSetDevice(i);
+		cudaDeviceReset(); CUERR("Resetting GPU device");
+	}
 }
