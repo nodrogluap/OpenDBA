@@ -153,4 +153,6 @@ int main(int argc, char **argv){
                 cudaSetDevice(i);
 		cudaDeviceReset(); CUERR("Resetting GPU device");
 	}
+
+	return 0;
 }
