@@ -74,7 +74,7 @@ In this way, thousands of sequence pair cost matrices are computed in parallel i
 4. The results of the initial all-vs-all DTW comparisons are stored to a distance matrix file (upper right format), so that it can be loaded into other software to do cluster analysis. For example, to perform complete linkage clustering and visualization of the time-warp corrected sequences (some series truncated, so open end mode required), using the R programming language:
 
 ```bash
-openDBA text float open_end foo 0 /dev/null numeric_series*.txt
+openDBA text float open_end foo 0 /dev/null 1 numeric_series*.txt
 R
 ```
 
