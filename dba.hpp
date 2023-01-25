@@ -832,7 +832,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 	cudaFreeHost(cpu_centroid); CUERR("Freeing CPU memory for the incoming centroid");
 
 	delete[] dtwCostSoFar; // Play nice and clean up the dynamic heap allocations.
-        //delete[] newDtwCostSoFar;
+        delete[] newDtwCostSoFar;
         //delete[] gpu_backtrace_rows;
         //delete[] pathMatrix;
         delete[] cpu_backtrace_outputstream;
