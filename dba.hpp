@@ -469,7 +469,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 	int flip_seq_order[deviceCount]; // boolean
         cudaStream_t seq_stream[deviceCount];
 	T **dtwCostSoFar = new T * [deviceCount];
-        T *newDtwCostSoFar[deviceCount] = {};
+        T **newDtwCostSoFar = new T * [deviceCount];
 	int *gpu_backtrace_rows[deviceCount] = {}; // for consensus update: backtracking indicator of first (vertical) seq in the DTW cost matrix for use with stripe mode
        	size_t pathPitch[deviceCount];
        	unsigned char *pathMatrix[deviceCount] = {};
