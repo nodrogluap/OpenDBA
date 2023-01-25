@@ -12,7 +12,7 @@
 
 template<typename T>
 void
-setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length, int norm_sequences, double cdist, const int prefix_start, const int prefix_length, bool is_short=false){
+setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series, char *output_prefix, int read_mode, int use_open_start, int use_open_end, int min_segment_length, int norm_sequences, double cdist, const int prefix_start=0, const int prefix_length=0, bool is_short=false){
 	size_t *sequence_lengths = 0;
 	T **segmented_sequences = 0;
 	size_t *segmented_seq_lengths = 0;
