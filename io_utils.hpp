@@ -265,115 +265,116 @@ int writeFast5Output(const char* fast5_file_name, const char* new_fast5_file, ch
 		std::cerr << "Error opening Group '/' from " << fast5_file_name << " Exiting." << std::endl;
                 return 1;
         }
-	
+
+	// Open the base read group in the new file
+        if((new_read_group = H5Gopen(new_file_id, "/", H5P_DEFAULT)) < 0){
+                std::cerr << "Error opening Group '/' from " << new_fast5_file << " Exiting." << std::endl;
+                return 1;
+        }
+
 	// Open the file_type attribute inside of the / read group in the original file
 	// To be closed after use
-	if((org_attr = H5Aopen(org_read_group, "file_type", H5P_DEFAULT)) < 0){ 
-		std::cerr << "Error opening Attribute 'file_type' from " << fast5_file_name << " Exiting." << std::endl;
-                return 1;
-        }
+	if((org_attr = H5Aopen(org_read_group, "file_type", H5P_DEFAULT)) >= 0){
 	
-	// Get the size of the data in file_type in the original file
-	if((org_attr_size = H5Aget_storage_size(org_attr)) == 0){ 
-		std::cerr << "Error getting Attribute 'file_type' size from " << fast5_file_name << " Exiting." << std::endl;
-                return 1;
-        }
+		// Get the size of the data in file_type in the original file
+		if((org_attr_size = H5Aget_storage_size(org_attr)) == 0){ 
+			std::cerr << "Error getting Attribute 'file_type' size from " << fast5_file_name << " Exiting." << std::endl;
+                	return 1;
+        	}
 	
-	// Get the type of the data in file_type in the original file
-	hid_t org_atype = H5Aget_type(org_attr);
-	char* data_buffer = (char*) std::malloc(org_attr_size);
+		// Get the type of the data in file_type in the original file
+		hid_t org_atype = H5Aget_type(org_attr);
+		char* data_buffer = (char*) std::malloc(org_attr_size);
 	
-	// Read in the data from the attribute file_type in the original file
-	if(H5Aread(org_attr, org_atype, (void*)data_buffer)){
-		std::cerr << "Error reading attribute 'file_type' from Fast5 file " << fast5_file_name << " Exiting." << std::endl;
-		return 1;
+		// Read in the data from the attribute file_type in the original file
+		if(H5Aread(org_attr, org_atype, (void*)data_buffer)){
+			std::cerr << "Error reading attribute 'file_type' from Fast5 file " << fast5_file_name << " Exiting." << std::endl;
+			return 1;
+		}
+	
+	
+		// Set the memory type of the new attribute to be a c string
+		memtype = H5Tcopy(H5T_C_S1);
+		if(H5Tset_size(memtype, org_attr_size)){
+			std::cerr << "Error assigning size for file_type in " << new_fast5_file << " Exiting." << std::endl;
+                	return 1;
+		}
+	
+		// Create a new string scalar dataspace for the data
+		if((space = H5Screate(H5S_SCALAR)) < 0){
+			std::cerr << "Failed to create a scalar memory space specification in the HDF5 API, please report to the software author(s)." << std::endl;
+			exit(FAST5_HDF5_API_ERROR);
+        	}
+	
+		// Create the new attribute with the above memtype and space
+		// To be closed after use
+		if((new_attr = H5Acreate(new_read_group, "file_type", memtype, space, H5P_DEFAULT, H5P_DEFAULT)) < 0){ 
+			std::cerr << "Error creating attribute 'file_type' for " << new_fast5_file << " Exiting." << std::endl;
+                	return 1;
+        	}
+	
+		// Write the new attribute to the new file
+		if(H5Awrite(new_attr, memtype, (void*)data_buffer)){
+			std::cerr << "Error writting attribute 'file_type' to Fast5 file " << new_fast5_file << " Exiting." << std::endl;
+			return 1;
+		}
+	
+		H5Aclose(org_attr);
+		H5Aclose(new_attr);
+	
+		// Open 'file_version' attribute in original file
+		if((org_attr = H5Aopen(org_read_group, "file_version", H5P_DEFAULT)) < 0){ 
+			std::cerr << "Error opening Attribute 'file_version' from " << fast5_file_name << " Exiting." << std::endl;
+                	return 1;
+        	}
+	
+		// Get size of 'file_version' attribute
+		if((org_attr_size = H5Aget_storage_size(org_attr)) == 0){ 
+			std::cerr << "Error getting Attribute 'file_version' size from " << fast5_file_name << " Exiting." << std::endl;
+                	return 1;
+        	}
+	
+		org_atype = H5Aget_type(org_attr);
+		data_buffer = (char*) std::realloc(data_buffer, org_attr_size);
+	
+		// Read in the data from the attribute file_version in the original file
+		if(H5Aread(org_attr, org_atype, (void*)data_buffer)){
+			std::cerr << "Error reading attribute 'file_version' from Fast5 file " << fast5_file_name << " Exiting." << std::endl;
+			return 1;
+		}
+	
+		if(H5Tset_size (memtype, org_attr_size)){
+			std::cerr << "Error assigning size for file_version in " << new_fast5_file << " Exiting." << std::endl;
+                	return 1;
+		}
+	
+		// Create the new attribute with the above memtype and space
+		if((new_attr = H5Acreate(new_read_group, "file_version", memtype, space, H5P_DEFAULT, H5P_DEFAULT)) < 0){ 
+			std::cerr << "Error creating attribute 'file_version' for " << new_fast5_file << " Exiting." << std::endl;
+                	return 1;
+        	}
+	
+		// Write the new attribute to the new file
+		if(H5Awrite(new_attr, memtype, (void*)data_buffer)){
+			std::cerr << "Error writting attribute 'file_version' to Fast5 file " << new_fast5_file << " Exiting." << std::endl;
+			return 1;
+		}
+	
+
+		// Close what's no longer needed
+		H5Tclose(memtype);
+		H5Sclose(space);
+	
+		H5Aclose(org_attr);
+		H5Aclose(new_attr);
+	
+		free(data_buffer);
 	}
-	
-	// Open the base read group in the new file
-	if((new_read_group = H5Gopen(new_file_id, "/", H5P_DEFAULT)) < 0){
-		std::cerr << "Error opening Group '/' from " << new_fast5_file << " Exiting." << std::endl;
-                return 1;
-        }
-	
-	// Set the memory type of the new attribute to be a c string
-	memtype = H5Tcopy(H5T_C_S1);
-	if(H5Tset_size(memtype, org_attr_size)){
-		std::cerr << "Error assigning size for file_type in " << new_fast5_file << " Exiting." << std::endl;
-                return 1;
-	}
-	
-	// Create a new string scalar dataspace for the data
-	if((space = H5Screate(H5S_SCALAR)) < 0){
-		std::cerr << "Failed to create a scalar memory space specification in the HDF5 API, please report to the software author(s)." << std::endl;
-		exit(FAST5_HDF5_API_ERROR);
-        }
-	
-	// Create the new attribute with the above memtype and space
-	// To be closed after use
-	if((new_attr = H5Acreate(new_read_group, "file_type", memtype, space, H5P_DEFAULT, H5P_DEFAULT)) < 0){ 
-		std::cerr << "Error creating attribute 'file_type' for " << new_fast5_file << " Exiting." << std::endl;
-                return 1;
-        }
-	
-	// Write the new attribute to the new file
-	if(H5Awrite(new_attr, memtype, (void*)data_buffer)){
-		std::cerr << "Error writting attribute 'file_type' to Fast5 file " << new_fast5_file << " Exiting." << std::endl;
-		return 1;
-	}
-	
-	H5Aclose(org_attr);
-	H5Aclose(new_attr);
-	
-	// Open 'file_version' attribute in original file
-	if((org_attr = H5Aopen(org_read_group, "file_version", H5P_DEFAULT)) < 0){ 
-		std::cerr << "Error opening Attribute 'file_version' from " << fast5_file_name << " Exiting." << std::endl;
-                return 1;
-        }
-	
-	// Get size of 'file_version' attribute
-	if((org_attr_size = H5Aget_storage_size(org_attr)) == 0){ 
-		std::cerr << "Error getting Attribute 'file_version' size from " << fast5_file_name << " Exiting." << std::endl;
-                return 1;
-        }
-	
-	org_atype = H5Aget_type(org_attr);
-	data_buffer = (char*) std::realloc(data_buffer, org_attr_size);
-	
-	// Read in the data from the attribute file_version in the original file
-	if(H5Aread(org_attr, org_atype, (void*)data_buffer)){
-		std::cerr << "Error reading attribute 'file_version' from Fast5 file " << fast5_file_name << " Exiting." << std::endl;
-		return 1;
-	}
-	
-	if(H5Tset_size (memtype, org_attr_size)){
-		std::cerr << "Error assigning size for file_version in " << new_fast5_file << " Exiting." << std::endl;
-                return 1;
-	}
-	
-	// Create the new attribute with the above memtype and space
-	if((new_attr = H5Acreate(new_read_group, "file_version", memtype, space, H5P_DEFAULT, H5P_DEFAULT)) < 0){ 
-		std::cerr << "Error creating attribute 'file_version' for " << new_fast5_file << " Exiting." << std::endl;
-                return 1;
-        }
-	
-	// Write the new attribute to the new file
-	if(H5Awrite(new_attr, memtype, (void*)data_buffer)){
-		std::cerr << "Error writting attribute 'file_version' to Fast5 file " << new_fast5_file << " Exiting." << std::endl;
-		return 1;
-	}
-	
-	// Close what's no longer needed
-	H5Tclose(memtype);
-	H5Sclose(space);
-	
-	H5Aclose(org_attr);
-	H5Aclose(new_attr);
-	
+
 	H5Gclose(org_read_group);
 	H5Gclose(new_read_group);
 	
-	free(data_buffer);
-	
+		
 	// End of metadata copy
 	// Start of reads copy
 	
