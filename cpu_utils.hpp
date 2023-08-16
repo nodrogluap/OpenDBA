@@ -363,7 +363,8 @@ read_fast5_data(const char *fast5_file_name, T **sequences, char **sequence_name
 		sequences[i] = t_seq;
 		sequence_lengths[i] = read_length;
 		cudaMallocHost(&sequence_names[local_seq_count_so_far], name_size); CUERR("Cannot allocate CPU memory for reading sequence name from FAST5 file");
-                memcpy(sequence_names[local_seq_count_so_far], read_subgroup_name, name_size);
+                memcpy(sequence_names[local_seq_count_so_far], read_subgroup_name, name_size-1); // -1 as not ASCIIZ, we'll put that in manually
+		sequence_names[local_seq_count_so_far][name_size-1] = '\0';
 
 		H5Dclose(signal_dataset_id);
 		local_seq_count_so_far++;
@@ -516,9 +517,9 @@ int readSequenceFAST5Files(char **filenames, int num_files, T ***sequences, char
         }
         std::cerr << ", total sequence count " << total_seq_count << std::endl;
         std::cerr << "0%        10%       20%       30%       40%       50%       60%       70%       80%       90%       100%" << std::endl;
-	cudaMallocManaged(sequences, sizeof(T *)*total_seq_count); CUERR("Allocating CPU memory for sequence pointers");
-        cudaMallocHost(sequence_names, sizeof(char *)*total_seq_count); CUERR("Allocating CPU memory for sequence lengths");
-        cudaMallocManaged(sequence_lengths, sizeof(size_t)*total_seq_count); CUERR("Allocating CPU memory for sequence lengths");
+	cudaMallocManaged(sequences, sizeof(T *)*total_seq_count); CUERR("Allocating managed memory for sequence pointers");
+        cudaMallocHost(sequence_names, sizeof(char *)*total_seq_count); CUERR("Allocating CPU memory for sequence names");
+        cudaMallocManaged(sequence_lengths, sizeof(size_t)*total_seq_count); CUERR("Allocating managed memory for sequence lengths");
 
         int dotsPrinted = 0;
         char spinner[4] = { '|', '/', '-', '\\'};
