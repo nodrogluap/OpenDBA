@@ -27,6 +27,10 @@
 #include "read_mode_codes.h"
 #include "mem_export.h" // for in - memory model of dba result for return to programmatic callers to performDBA()
 
+#define CLUSTER_ONLY 1
+#define CONSENSUS_ONLY 2
+#define CLUSTER_AND_CONSENSUS 3
+
 using namespace cudahack; // for device-side numeric limits
 
 template<typename T>
@@ -300,7 +304,7 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 			}
 		}
 		int *clusterIndices = new int[num_cluster_members];
-		std::cerr << " membership=" << num_cluster_members << ", " << std::endl;
+		std::cerr << " membership=" << num_cluster_members << ", ";
 		int cluster_cursor = 0;
 		for(size_t i = 0; i < num_sequences; ++i){
 			if(memberships[i] == currCluster){
@@ -342,7 +346,7 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 			exit(MEDOID_FINDING_ERROR);
 		}
 		medoidIndices[currCluster] = medoidIndex;
-		std::cerr << " medoid is " << medoidIndex << std::endl;
+		std::cerr << "medoid is " << medoidIndex << std::endl;
 		delete[] clusterIndices;
 	}
 	if(num_clusters != 1){
@@ -356,7 +360,7 @@ __host__ int* approximateMedoidIndices(T *gpu_sequences, size_t maxSeqLength, si
 	}
 	cudaFreeHost(gpu_dtwPairwiseDistances); CUERR("Freeing CPU memory for GPU DTW pairwise distances' pointers");
 	mats.close();
-	std::cerr << "Returning medoid indices" << std::endl;
+	//std::cerr << "Returning medoid indices" << std::endl;
 	return medoidIndices;
 }
 
@@ -468,8 +472,8 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
        	size_t current_seq_length[deviceCount];
 	int flip_seq_order[deviceCount]; // boolean
         cudaStream_t seq_stream[deviceCount];
-	T **dtwCostSoFar = new T * [deviceCount];
-        T **newDtwCostSoFar = new T * [deviceCount];
+	T **dtwCostSoFar = new T * [deviceCount](); // parentheses zero-initializes
+        T **newDtwCostSoFar = new T * [deviceCount]();
 	int *gpu_backtrace_rows[deviceCount] = {}; // for consensus update: backtracking indicator of first (vertical) seq in the DTW cost matrix for use with stripe mode
        	size_t pathPitch[deviceCount];
        	unsigned char *pathMatrix[deviceCount] = {};
@@ -852,10 +856,13 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
  *                the number of sequences to be run through the algorithm
  * @param sequence_lengths
  *                the length of each member of the ragged array
+ * @param algo_mode
+ * 		  CLUSTER_ONLY, CONSENSUS_ONLY, or CLUSTER_AND_CONSENSUS
  */
 template <typename T>
-__host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, int use_open_start, int use_open_end, char *output_prefix, int norm_sequences, double cdist, char** series_file_names, int num_series, int read_mode, bool is_segmented, dba_result<T> *result, cudaStream_t stream=0) {
+__host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_lengths, char **sequence_names, int use_open_start, int use_open_end, char *output_prefix, int norm_sequences, double cdist, char** series_file_names, int num_series, int read_mode, bool is_segmented, int algo_mode, cudaStream_t stream=0) {
 
+	//std::cerr << "Seq lengths" << std::endl;
 	// Sanitize the data from potential upstream artifacts or overflow situations
 	for(int i = 0; i < num_sequences; i++){
 		if(sequences[i][sequence_lengths[i]-1] >= sqrt(std::numeric_limits<T>::max())){
@@ -864,6 +871,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	}
 
 	// Sort the sequences by length for memory efficiency in computation later on.
+	//std::cerr << "Seq copy" << std::endl;
 	size_t *sequence_lengths_copy;
 	cudaMallocHost(&sequence_lengths_copy, sizeof(size_t)*num_sequences); CUERR("Allocating CPU memory for sortable copy of sequence lengths");
 	if(memcpy(sequence_lengths_copy, sequence_lengths, sizeof(size_t)*num_sequences) != sequence_lengths_copy){
@@ -878,6 +886,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	// Send the sequence metadata and data out to all the devices being used.
         int deviceCount;
         cudaGetDeviceCount(&deviceCount); CUERR("Getting GPU device count in DBA setup method");
+	//std::cerr << "Dev count" << std::endl;
 #if DEBUG == 1
         std::cerr << "Devices found: " << deviceCount << std::endl;
 #endif
@@ -888,6 +897,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	// kept a copy of the original data in memory.
 	double *sequence_means;
 	double *sequence_sigmas;
+	//std::cerr << "Seq norm" << std::endl;
 	if(norm_sequences){
 		cudaMallocManaged(&sequence_means, sizeof(double)*num_sequences); CUERR("Allocating managed memory for array of sequence means");
 		cudaMallocManaged(&sequence_sigmas, sizeof(double)*num_sequences); CUERR("Allocating managed memory for array of sequence sigmas");
@@ -898,28 +908,43 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	       	normalizeSequences(sequences, num_sequences, sequence_lengths, -1, sequence_means, sequence_sigmas, stream);
 	}
 
-	T *gpu_sequences = 0;
-	cudaMallocManaged(&gpu_sequences, sizeof(T)*num_sequences*maxLength); CUERR("Allocating GPU memory for array of evenly spaced sequences");
-	// Make a GPU copy of the input ragged 2D array as an evenly spaced 1D array for performance (at some cost to space if very different lengths of input are used)
-	for (int i = 0; i < num_sequences; i++) {
-       		cudaMemcpyAsync(gpu_sequences+i*maxLength, sequences[i], sequence_lengths[i]*sizeof(T), cudaMemcpyHostToDevice, stream); CUERR("Copying sequence to GPU memory");
-	}
-
-	cudaStreamSynchronize(stream); CUERR("Synchronizing the CUDA stream after sequences' copy to GPU");
-        // Pick a seed sequence from the original input, with the smallest L2 norm (residual sum of squares).
-	setupPercentageDisplay(CONCAT2("Step 2 of 3: Finding initial ",(cdist != 1 ? "clusters and medoids" : "medoid")));
 	int* sequences_membership = new int[num_sequences];
-	int *medoidIndices = approximateMedoidIndices(gpu_sequences, maxLength, num_sequences, sequence_lengths, sequence_names, use_open_start, use_open_end, output_prefix, 
-			                              &cdist, sequences_membership, stream);
+	int *medoidIndices;
+
+	if(algo_mode == CLUSTER_AND_CONSENSUS || algo_mode == CLUSTER_ONLY){
+		//std::cerr << "Clustering data" << std::endl;
+		// Calculate the clusters
+		T *gpu_sequences = 0;
+		cudaMallocManaged(&gpu_sequences, sizeof(T)*num_sequences*maxLength); CUERR("Allocating GPU memory for array of evenly spaced sequences");
+		// Make a GPU copy of the input ragged 2D array as an evenly spaced 1D array for performance (at some cost to space if very different lengths of input are used)
+		for (int i = 0; i < num_sequences; i++) {
+       			cudaMemcpyAsync(gpu_sequences+i*maxLength, sequences[i], sequence_lengths[i]*sizeof(T), cudaMemcpyHostToDevice, stream); CUERR("Copying sequence to GPU memory");
+		}
+
+		cudaStreamSynchronize(stream); CUERR("Synchronizing the CUDA stream after sequences' copy to GPU");
+        	// Pick a seed sequence from the original input, with the smallest L2 norm (residual sum of squares).
+		setupPercentageDisplay(CONCAT2("Step 2 of 3: Finding initial ",(cdist != 1 ? "clusters and medoids" : "medoid")));
+		medoidIndices = approximateMedoidIndices(gpu_sequences, maxLength, num_sequences, sequence_lengths, sequence_names, use_open_start, use_open_end, output_prefix, 
+	 		                                 &cdist, sequences_membership, stream);
+		cudaFree(gpu_sequences); CUERR("Freeing CPU memory for GPU sequence data");
+	}
+	else if(algo_mode == CONSENSUS_ONLY){
+		// Read from a previous call to this method.
+		std::cerr << "Reading previous clustering data" << std::endl;
+		medoidIndices = readMedoidIndices(CONCAT2(output_prefix, ".cluster_membership.txt").c_str(), num_sequences, sequence_names, sequences_membership);
+	}
+	else{
+		std::cerr << "Call to performDBA included an unrecognized algorithm mode " << algo_mode << " (programming error, please contact the developer)" << std::endl;
+                exit(UNKNOWN_ALGO);
+	}
 	teardownPercentageDisplay();	
 	// Don't need the full complement of evenly space sequences again.
-	cudaFree(gpu_sequences); CUERR("Freeing CPU memory for GPU sequence data");
 
 	int num_clusters = 1;
 	if(cdist != 1){ // in cluster mode
 		std::ofstream membership_file(CONCAT2(output_prefix, ".cluster_membership.txt").c_str());
         	if(!membership_file.is_open()){
-                	std::cerr << "Cannot open sequence cluster membership file " << output_prefix << ".cluster_membership.txt for writing" << std::endl;
+                	std::cerr << "Cannot open sequence cluster membership file " << CONCAT2(output_prefix, ".cluster_membership.txt").c_str() << " for writing" << std::endl;
                 	exit(CANNOT_WRITE_MEMBERSHIP);
         	}
 		membership_file << "## cluster distance threshold was " << cdist << std::endl;
@@ -933,7 +958,12 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		membership_file.close();
 		std::cerr << "Found " << num_clusters << " clusters using complete linkage and cluster distance cutoff " << cdist << std::endl;
 	}
+	// See if the caller's request was for just membership and act accordingly.
+	if(algo_mode == CLUSTER_ONLY){
+		return;
+	}
 
+	// TODO: to support checkpointing the compute, write each centroid independently, then just double check that delta is zero from each centroid if the centroid already exists.
         // Where to save results
         std::ofstream avgs_file(CONCAT2(output_prefix, ".avg.txt").c_str());
         if(!avgs_file.is_open()){
@@ -989,6 +1019,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 				}
 			}
 			avgs_file << std::endl;
+			avgs_file.flush(); // for checkpointing
 			
 #if HDF5_SUPPORTED == 1 || SLOW5_SUPPORTED == 1
 			// Populate average buffers for writing fast5 output
@@ -1105,7 +1136,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
         avgs_file.close();
 	
 #if HDF5_SUPPORTED == 1
-	if(is_segmented && read_mode == FAST5_READ_MODE && num_series == 1){
+	if(!is_segmented && read_mode == FAST5_READ_MODE && num_series == 1){
 		std::cerr << "Writing medoids to new fast5 file..." << std::endl;
 		if(writeFast5Output(series_file_names[0], CONCAT2(output_prefix, ".avg.fast5").c_str(), avgNames, avgSequences, avgSeqLengths, num_clusters) == 1){
 			std::cerr << "Cannot write updated sequences to new Fast5 file " << CONCAT2(output_prefix, ".avg.fast5").c_str() << ", aborting." << std::endl;
@@ -1118,7 +1149,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 #endif
 
 #if SLOW5_SUPPORTED == 1
-	if(is_segmented && read_mode == SLOW5_READ_MODE && num_series == 1){
+	if(!is_segmented && read_mode == SLOW5_READ_MODE && num_series == 1){
 		std::cerr << "Writing medoids to new slow5 file..." << std::endl;
 		if(writeSlow5Output(series_file_names[0], CONCAT2(output_prefix, ".avg.blow5").c_str(), avgNames, avgSequences, avgSeqLengths, num_clusters) == 1){
 			std::cerr << "Cannot write updated sequences to new Fast5 file " << CONCAT2(output_prefix, ".avg.blow5").c_str() << ", aborting." << std::endl;

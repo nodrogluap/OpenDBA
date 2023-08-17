@@ -41,12 +41,12 @@ int main(int argc, char **argv){
 #else
 		std::cout << "<short|int|uint|ulong|float|double> " <<
 #endif
-		          "<global|open_start|open_end|open> <output files prefix> <minimum unimodal segment length, or 0 for no segmentation> <prefix sequence to remove|/dev/null> <clustering threshold> <series.tsv|<series1> <series2> [series3...]>\n";
+		          "<global|open_start|open_end|open> <output files prefix> <minimum unimodal segment length for clustering[,for consensus generation]> <prefix sequence to remove|/dev/null> <clustering threshold> <series.tsv|<series1> <series2> [series3...]>\n";
 		exit(1);
      	}
 
 	int num_series = argc-8;
-	int min_segment_length = atoi(argv[5]); // reasonable settings for nanopore RNA dwell time distributions would be 4 (lower to 2 for DNA)
+	char *min_segment_length = argv[5]; // reasonable settings for nanopore RNA dwell time distributions would be 4 (lower to 2 for DNA)
 	int read_mode = TEXT_READ_MODE;
 	if(!strcmp(argv[1],"binary")){
 		read_mode = BINARY_READ_MODE;

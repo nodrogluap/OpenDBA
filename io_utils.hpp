@@ -8,6 +8,13 @@
 // For CONCAT definitions
 #include "cpu_utils.hpp"
 
+// C++ string/file manipulation
+#include <iomanip>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+
 #if HDF5_SUPPORTED == 1
 extern "C"{
   #include "hdf5.h"
@@ -20,6 +27,101 @@ extern "C"{
 
 // Text progress bar UI element
 static char spinner[] = { '|', '/', '-', '\\'};
+
+// Inspired by http://stackoverflow.com/a/236803/248823
+void split_line_by_delimiter(const std::string &s, char delim, std::vector<std::string> &tokens) {
+    std::stringstream ss;
+    ss.str(s);
+    std::string token;
+    while (std::getline(ss, token, delim)) {
+        tokens.push_back(token);
+    }
+}
+
+/*
+ *  sequences_membership gets populated from tab-delimited membership_filename, return value is sequence index (per sequence_names) of the medoids for each cluster 
+ */ 
+int* readMedoidIndices(const char *membership_filename, int num_sequences, char **sequence_names, int *sequences_membership){
+    // Read an existing cluster membership info set from file
+    std::ifstream membership_file(membership_filename);
+    if(!membership_file.is_open()){
+            std::cerr << "Cannot open sequence cluster membership file " << membership_filename << " for reading" << std::endl;
+            exit(CANNOT_READ_MEMBERSHIP);
+    }
+    std::string line; 
+    int file_num_clusters = 0;
+    // Ignore first, comment line
+    std::getline(membership_file, line);
+    if(line.compare(0, 1, "#")){
+	    std::cerr << "The existing sequence cluster membership file " << membership_filename << " has a first line "
+                      << "without the expected '#' comment start" << std::endl;
+            exit(MEMBERSHIP_FILE_FORMAT_VIOLATION);
+    }
+    int line_number = 1;
+    while (std::getline(membership_file, line)) {
+            line_number++; 
+	    std::vector<std::string> row_values;
+            split_line_by_delimiter(line, '\t', row_values);
+            if(row_values.size() != 3){
+                    std::cerr << "The existing sequence cluster membership file " << membership_filename << " has a line (#" << line_number
+                              << ") without the expected three columns (found " << row_values.size() << ")" << std::endl;
+                    exit(MEMBERSHIP_FILE_FORMAT_VIOLATION);
+            }
+            try{    
+                    int cluster_index = std::stoi(row_values[1]);
+            	    if(cluster_index > file_num_clusters){
+                            file_num_clusters = cluster_index;
+                    }
+                    int sequence_index = -1;
+	            // Find the index of the sequence name 
+                    for(int i = 0; i < num_sequences; i++){
+		            if(row_values[0].compare(sequence_names[i]) == 0){
+		             	sequence_index = i;
+		             	break;
+		            }
+	            }
+                    if(sequence_index == -1){
+                            std::cerr << "The existing sequence cluster membership file " << membership_filename << " has a line (#" << line_number
+                                      << ") with a sequence name not found in the input (" << row_values[0] << " not in existing list of " << num_sequences << " names)" << std::endl;
+                            exit(MEMBERSHIP_FILE_FORMAT_VIOLATION);
+                    }
+
+                    sequences_membership[sequence_index] = cluster_index;
+            }catch (std::invalid_argument const& ex) {
+                    std::cerr << "The existing sequence cluster membership file " << membership_filename << " has a line (#" << line_number
+                              << ") where the second tab-delimited column value (" << row_values[1] << ") is not an integer as expected: "
+                              << ex.what() << std::endl;
+                    exit(MEMBERSHIP_FILE_FORMAT_VIOLATION);
+            }
+            catch (std::out_of_range const& ex) {
+                    std::cerr << "The existing sequence cluster membership file " << membership_filename << " has a line (#" << line_number
+                              << ") where the second tab-delimited column value (" << row_values[1] << ") is not in the standard integer range: "
+                              << ex.what() << std::endl;
+                    exit(MEMBERSHIP_FILE_FORMAT_VIOLATION);
+            }
+    }
+    // Rewind to capture the medoids now that we know how many there are.
+    int *medoidIndices = new int[file_num_clusters];
+    membership_file.clear();
+    membership_file.seekg(0);
+    while (std::getline(membership_file, line)) {
+	    // Forgoing checks as input's been validated above.
+	    std::vector<std::string> row_values;
+            split_line_by_delimiter(line, '\t', row_values);
+            if(row_values[0] == row_values[2]){
+		    int sequence_index = -1;
+	            // Find the index of the sequence name
+            	    for(int i = 0; i < num_sequences; i++){
+                        if(row_values[0].compare(sequence_names[i]) == 0){
+                            sequence_index = i;
+                            break;
+                        }
+                    }
+                    medoidIndices[std::stoi(row_values[1])] = sequence_index;
+            }
+    }
+    return medoidIndices;
+}
 
 template <typename T>
 __host__
