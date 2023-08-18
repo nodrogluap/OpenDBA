@@ -167,16 +167,16 @@ Where ```open_prefix_98``` tells it how many segmented event to look at (this ca
 
 ## Writing FAST5 data
 
-Given a *single* multi-FAST5 OpenDBA will now write the cluster sequence averages (including singletons verbatim) to ```outputprefix.avg.fast5```. This file can then be used as input for basecalling (has been tested with ONT's Guppy software). Particularly for direct RNA this can be useful, as single read basecall quality is still fairly poor. Averaging multiple sequences at the raw signal level can increase the accuracy of the basecalling as a kind of denoising step. You must not chop the prefix, and segmentation must be disabled. The following will generate a FAST5 file with a single consensus raw signal from the whole of the test input:
+Given a *single* multi-FAST5 OpenDBA will now write the cluster sequence averages (including singletons verbatim) to ```outputprefix.avg.fast5```. This file can then be used as input for basecalling (has been tested with ONT's Guppy software). Particularly for direct RNA this can be useful, as single read basecall quality is still fairly poor. Averaging multiple sequences at the raw signal level can increase the accuracy of the basecalling as a kind of denoising step. We have found it most useful to prefix chop and segment with size *4* for RNA to generate clusters, but then generate consensus from the raw signals (segment size *0*). OpenDBA now supports this by allowing two values for segmentation in the format "#,#" for cluster generation and consensus generation respectively. If the second number is zero, the prefix chop does not occur on the raw signal consensus so it looks like a normal raw read for downstream tools (even though it was ignored internally by OpenDBA during the clustering step). The following will generate a FAST5 file with a single consensus raw signal from the whole of the test input:
 
 ```
-openDBA fast5 float open_end test_out 0 /dev/null 1 test_in.fast5
+openDBA fast5 float open_end test_out 4,0 direct_rna_leader_float.txt 1 test_in.fast5
 ```
 
 For the moment, if you have multiple FAST5 files you'd like to average at the raw signal level, this must be done as a preprocessing step before you use OpenDBA. If you expect 13 different transcripts, and you want to output a consensus raw signal for all of them, simply change the clustering parameter:
 
 ```
-openDBA fast5 float open_end test_out 0 /dev/null 13 test_in.fast5
+openDBA fast5 float open_end test_out 4,0 direct_rna_leader_float.txt 13 test_in.fast5
 ```
 
 ## Writing BLOW5 data
@@ -184,13 +184,13 @@ openDBA fast5 float open_end test_out 0 /dev/null 13 test_in.fast5
 Given a *single* S/BLOW5 file OpenDBA will now write the cluster sequence averages (including singletons verbatim) to ```outputprefix.avg.blow5```. This file can then be used as input for basecalling (using SLOW5 [Guppy Wrapper](https://github.com/Psy-Fer/buttery-eel)). The following will generate a S/BLOW5 file with a single consensus raw signal from the whole of the test input:
 
 ```
-openDBA slow5 float open_end test_out 0 /dev/null 1 test_in.blow5 #or .slow5
+openDBA slow5 float open_end test_out 4,0 direct_rna_leader_float.txt 1 test_in.blow5 #or .slow5
 ```
 
 For the moment, if you have multiple S/BLOW5 files you'd like to average at the raw signal level, you can create a single BLOW5 file using [slow5tools merge](https://github.com/hasindu2008/slow5tools). If you expect 13 different transcripts, and you want to output a consensus raw signal for all of them, simply change the clustering parameter:
 
 ```
-openDBA slow5 float open_end test_out 0 /dev/null 13 test_in.blow5 #or .slow5
+openDBA slow5 float open_end test_out 4,0 direct_rna_leader_float.txt 13 test_in.blow5 #or .slow5
 ```
 
 
