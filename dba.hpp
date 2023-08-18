@@ -941,7 +941,13 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 	// Don't need the full complement of evenly space sequences again.
 
 	int num_clusters = 1;
-	if(cdist != 1){ // in cluster mode
+	for (int i = 0; i < num_sequences; i++) {
+                if(sequences_membership[i] > num_clusters-1){
+                        num_clusters = sequences_membership[i]+1;
+                }
+        }
+	// No need to rewrite the (unchanged) membership file if we're in CONSENSUS_ONLY mode
+	if(cdist != 1 && algo_mode != CONSENSUS_ONLY){ // in cluster mode
 		std::ofstream membership_file(CONCAT2(output_prefix, ".cluster_membership.txt").c_str());
         	if(!membership_file.is_open()){
                 	std::cerr << "Cannot open sequence cluster membership file " << CONCAT2(output_prefix, ".cluster_membership.txt").c_str() << " for writing" << std::endl;
@@ -951,9 +957,6 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 
 		for (int i = 0; i < num_sequences; i++) {
 			membership_file << sequence_names[i] << "\t" << sequences_membership[i] << "\t" << sequence_names[medoidIndices[sequences_membership[i]]] << std::endl;
-			if(sequences_membership[i] > num_clusters-1){
-	       			num_clusters = sequences_membership[i]+1;
-			}
 		}
 		membership_file.close();
 		std::cerr << "Found " << num_clusters << " clusters using complete linkage and cluster distance cutoff " << cdist << std::endl;
@@ -963,25 +966,31 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		return;
 	}
 
-	// TODO: to support checkpointing the compute, write each centroid independently, then just double check that delta is zero from each centroid if the centroid already exists.
-        // Where to save results
-        std::ofstream avgs_file(CONCAT2(output_prefix, ".avg.txt").c_str());
-        if(!avgs_file.is_open()){
-                std::cerr << "Cannot open sequence averages file " << output_prefix << ".avg.txt for writing" << std::endl;
-                exit(CANNOT_WRITE_DBA_AVG);
-        }
-
-#if HDF5_SUPPORTED == 1 || SLOW5_SUPPORTED == 1
 	short **avgSequences = 0;
 	char **avgNames = 0;
 	size_t *avgSeqLengths = 0;
+#if HDF5_SUPPORTED == 1 || SLOW5_SUPPORTED == 1
 	
 	cudaMallocHost(&avgSequences, sizeof(short*)*num_clusters);		 CUERR("Allocating GPU memory for average sequences");
 	cudaMallocHost(&avgNames, sizeof(char*)*num_clusters);		 CUERR("Allocating GPU memory for average names");
 	cudaMallocHost(&avgSeqLengths, sizeof(size_t)*num_clusters);		 CUERR("Allocating GPU average for medoid lengths");
 #endif
+	// To support checkpointing the compute, write each converged centroid as it's calculated, so we can pick up the computation after the last 
+	// succesful cluster converged.
+	int currCluster = 0;
+	if(file_exists(CONCAT2(output_prefix, ".avg.txt").c_str())){
+		currCluster = readSequenceAverages(CONCAT2(output_prefix, ".avg.txt").c_str(), avgSequences, avgNames, avgSeqLengths)+1;
+		std::cerr << "Restarting convergence with cluster " << (currCluster+1) << "/" << num_clusters << " based on checkpoint in " << CONCAT2(output_prefix, ".avg.txt") << std::endl;
+		// TODO: exit normally now if currCluster+1 == num_clusters?
+	}
+        std::ofstream avgs_file(CONCAT2(output_prefix, ".avg.txt").c_str(), std::ios::app);
+        if(!avgs_file.is_open()){
+                std::cerr << "Cannot open sequence averages file " << output_prefix << ".avg.txt for writing" << std::endl;
+                exit(CANNOT_WRITE_DBA_AVG);
+        }
 
-	for(int currCluster = 0; currCluster < num_clusters; currCluster++){
+
+	for(;currCluster < num_clusters; currCluster++){
 		int num_members = 0;
 		for (int i = 0; i < num_sequences; i++) {
                 	if(sequences_membership[i] == currCluster){
@@ -1031,8 +1040,11 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		}
 
 		T *gpu_barycenter = 0;
-		cudaMallocManaged(&gpu_barycenter, sizeof(T)*medoidLength); CUERR("Allocating GPU memory for DBA result");
-        	cudaMemcpyAsync(gpu_barycenter, sequences[medoidIndices[currCluster]], medoidLength*sizeof(T), cudaMemcpyDeviceToDevice, stream);  CUERR("Copying medoid seed to GPU memory");
+		cudaMallocManaged(&gpu_barycenter, sizeof(T)*medoidLength); CUERR("Allocating managed GPU memory for DBA result");
+		// See if a partially-converged centroid already exists for this cluster (i.e. we should be picking up from a checkpoint)
+		if(!readCentroidCheckpointFromFile(CONCAT4(output_prefix, ".", std::to_string(currCluster), ".evolving_centroid.txt").c_str(), gpu_barycenter, medoidLength)){
+        		cudaMemcpyAsync(gpu_barycenter, sequences[medoidIndices[currCluster]], medoidLength*sizeof(T), cudaMemcpyDeviceToDevice, stream);  CUERR("Launching async copy of medoid seed to GPU memory");
+		}
 
         	// Refine the alignment iteratively.
 		T *new_barycenter = 0, *previous_barycenter, *two_previous_barycenter;
@@ -1043,7 +1055,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 		}
 
 		std::cerr << "Processing cluster " << (currCluster+1) << " of " << num_clusters << ", " << 
-			  num_members << " members, initial medoid " << sequence_names[medoidIndices[currCluster]] << " has length " << medoidLength << std::endl;
+			  num_members << " members, medoid " << sequence_names[medoidIndices[currCluster]] << " has length " << medoidLength << std::endl;
 		// Allocate storage for an array of pointers to just the sequences from this cluster, so we generate averages for each cluster independently
 		T **cluster_sequences;
 		cudaMallocManaged(&cluster_sequences, sizeof(T**)*num_members); CUERR("Allocating GPU memory for array of cluster member sequence pointers");
@@ -1076,7 +1088,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 			teardownPercentageDisplay();
 			std::cerr << "New delta is " << delta << std::endl;
 			if(delta == 0){
-				break;
+				break; // converged!
 			}
 			// In open end mode (unlike global), it's possible for the centroid to flip between two nearly identical
 			// centroids in perpetuity, so never really "converging". Handle this case with a shortcircuit.
@@ -1092,6 +1104,7 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 					cudaMemcpy(previous_barycenter, new_barycenter, medoidLength*sizeof(T), cudaMemcpyHostToHost); CUERR("Replacing previously updated DBA medoid on host");
 				}
 			}
+			writeCentroidCheckpointToFile(CONCAT4(output_prefix, ".", std::to_string(currCluster), ".evolving_centroid.txt").c_str(), new_barycenter, medoidLength);
 			cudaMemcpy(gpu_barycenter, new_barycenter, sizeof(T)*medoidLength, cudaMemcpyHostToDevice);  CUERR("Copying updated DBA medoid to GPU");
 		}
 		// Clean up the GPU memory we don't need any more.
@@ -1114,6 +1127,8 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 			avgs_file << "\t" << ((T *) new_barycenter)[i]; 
 		}
 		avgs_file << std::endl;
+		avgs_file.flush(); // for checkpointing
+		deleteCentroidCheckpointFile(CONCAT4(output_prefix, ".", std::to_string(currCluster), ".evolving_centroid.txt").c_str());
 		
 #if HDF5_SUPPORTED == 1 || SLOW5_SUPPORTED == 1
 		// Populate medoid buffers for writing fast5 output
@@ -1142,7 +1157,11 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 			std::cerr << "Cannot write updated sequences to new Fast5 file " << CONCAT2(output_prefix, ".avg.fast5").c_str() << ", aborting." << std::endl;
 			exit(CANNOT_WRITE_UPDATED_FAST5);
 		}
-		cudaFreeHost(avgSequences);	 CUERR("Freeing GPU memory for average sequences");
+		for(int i = 0; i < num_clusters; i++){
+			cudaFreeHost(avgSequences[i]);      CUERR("Freeing GPU memory for an average sequence");
+			cudaFreeHost(avgNames[i]);      CUERR("Freeing GPU memory for an average sequence name");
+		}
+		cudaFreeHost(avgSequences);	 CUERR("Freeing GPU memory for average sequence pointers");
 		cudaFreeHost(avgNames);		 CUERR("Freeing GPU memory for average names");
 		cudaFreeHost(avgSeqLengths);	 CUERR("Freeing GPU memory for average lengths");
 	}		
@@ -1155,7 +1174,10 @@ __host__ void performDBA(T **sequences, int num_sequences, size_t *sequence_leng
 			std::cerr << "Cannot write updated sequences to new Fast5 file " << CONCAT2(output_prefix, ".avg.blow5").c_str() << ", aborting." << std::endl;
 			exit(CANNOT_WRITE_UPDATED_SLOW5);
 		}
-		cudaFreeHost(avgSequences);	 CUERR("Freeing GPU memory for average sequences");
+		for(int i = 0; i < num_clusters; i++){
+			cudaFreeHost(avgSequences[i]);      CUERR("Freeing GPU memory for an average sequence");
+		}
+		cudaFreeHost(avgSequences);	 CUERR("Freeing GPU memory for average sequence pointers");
 		cudaFreeHost(avgNames);		 CUERR("Freeing GPU memory for average names");
 		cudaFreeHost(avgSeqLengths);	 CUERR("Freeing GPU memory for average lengths");
 	}		

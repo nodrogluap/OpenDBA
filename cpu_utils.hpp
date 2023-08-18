@@ -27,6 +27,7 @@ extern "C"{
 
 #define CONCAT2(a,b)   (std::string(a)+std::string(b))
 #define CONCAT3(a,b,c)   (std::string(a)+std::string(b)+std::string(c))
+#define CONCAT4(a,b,c,d)   (std::string(a)+std::string(b)+std::string(c)+std::string((d)))
 
 unsigned int FileRead( std::istream & is, std::vector <char> & buff ) {
     is.read( &buff[0], buff.size() );

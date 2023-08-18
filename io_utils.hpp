@@ -5,7 +5,7 @@
 #include "dtw.hpp"
 #include "exit_codes.hpp"
 
-// For CONCAT definitions
+// For CONCAT definitions, templateToShort()
 #include "cpu_utils.hpp"
 
 // C++ string/file manipulation
@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <cstdio>
 
 #if HDF5_SUPPORTED == 1
 extern "C"{
@@ -27,15 +28,130 @@ extern "C"{
 
 // Text progress bar UI element
 static char spinner[] = { '|', '/', '-', '\\'};
+static bool warned_about_checkpoint;
+
+__host__
+bool file_exists(const char *fileName){
+    std::ifstream infile(fileName);
+    return infile.good();
+}
 
 // Inspired by http://stackoverflow.com/a/236803/248823
-void split_line_by_delimiter(const std::string &s, char delim, std::vector<std::string> &tokens) {
+__host__
+void split_line_by_delimiter(const std::string &s, char delim, std::vector<std::string> &tokens){
     std::stringstream ss;
     ss.str(s);
     std::string token;
     while (std::getline(ss, token, delim)) {
         tokens.push_back(token);
     }
+}
+
+__host__
+void deleteCentroidCheckpointFile(const char *checkpoint_file_name){
+    	if(remove(checkpoint_file_name) != 0){
+     		std::cerr << "Warning: could not remove temporary checkpoint file " << checkpoint_file_name << std::endl;
+  	}
+}
+
+template <typename T>
+__host__
+void writeCentroidCheckpointToFile(const char *checkpoint_file_name, T *gpu_barycenter, int centroidLength){
+
+	std::ofstream checkpoint_file(checkpoint_file_name);
+	if(!checkpoint_file.is_open()){
+		if(!warned_about_checkpoint){
+			warned_about_checkpoint = true;
+                	std::cerr << "Cannot open centroid convergence checkpoint file " << checkpoint_file_name <<
+                       	             " for writing, no checkpointing for this cluster will be done (i.e. computation cannot be resumed if the program dies unexpectedly)" << std::endl;
+		}
+                return;
+        }
+	checkpoint_file << gpu_barycenter[0];
+	for(int i = 1; i < centroidLength; i++){
+		checkpoint_file << " " << gpu_barycenter[i];
+	}
+	checkpoint_file << std::endl;
+	checkpoint_file.close();
+}
+
+// Read an evolving centroid (as printed between rounds of convergence) for the ability to pick up the computation from a checkpoint.
+template <typename T>
+__host__
+int readCentroidCheckpointFromFile(const char *checkpoint_file_name, T *centroid, int centroidLength){
+	if(!file_exists(checkpoint_file_name)){
+		return 0;
+	}
+
+	std::ifstream checkpoint_file(checkpoint_file_name);
+        if(!checkpoint_file.is_open()){
+                std::cerr << "Cannot open existing centroid convergence checkpoint file " << checkpoint_file_name << 
+			     " for reading, will have to restart convergence for this cluster from the start (medoid)" << std::endl;
+		return 0;
+        }
+
+	std::string line;
+	if(!std::getline(checkpoint_file, line)) {
+		std::cerr << "Existing centroid convergence checkpoint file " << checkpoint_file_name << 
+                             "is blank, will have to restart convergence for this cluster from the start (centroid = medoid)" << std::endl;
+                return 0;
+	}
+	std::vector<std::string> values;
+	split_line_by_delimiter(line, ' ', values);
+	if(values.size() != centroidLength){
+		std::cerr << "Existing centroid convergence checkpoint file " << checkpoint_file_name <<
+                             " contents does not have the same sequence length as the cluster medoid (" << values.size() <<
+			     " != " << centroidLength << "), assuming corrupt checkpoint file and " <<
+			     "will have to restart convergence for this cluster from the start (centroid = medoid)" << std::endl;
+                return 0;
+	}
+	std::cerr << "Resuming convergence from partially converged centroid in file " << checkpoint_file_name << std::endl;
+	std::stringstream ss(line);
+	for (int i = 0; i < centroidLength; i++){
+		ss >> centroid[i];
+	}
+	checkpoint_file.close();
+	return 1;
+}
+
+// Always reading as shorts because this function is for FAST5 writing capability of DBA.
+__host__
+int readSequenceAverages(const char *avgs_file_name, short **avgSequences, char **avgNames, size_t *avgSeqLengths){
+	// Are we even in a mode where we want these data?
+	if(avgSequences == 0 || avgNames == 0 || avgSeqLengths == 0){
+		return 0;
+	}
+
+        std::ifstream avgs_file(avgs_file_name);
+        if(!avgs_file.is_open()){
+                std::cerr << "Cannot open sequence averages file " << avgs_file_name << " for reading" << std::endl;
+                exit(CANNOT_READ_DBA_AVG);
+	}
+	std::string line;
+	int line_number = 0;
+    	while (std::getline(avgs_file, line)) {
+            	line_number++;
+            	std::vector<std::string> row_values;
+            	split_line_by_delimiter(line, '\t', row_values);
+            if(row_values.size() < 2){
+                    std::cerr << "The existing cluster average sequences file " << avgs_file_name << " has a line (#" << line_number
+                              << ") without the expected two-plus columns (found " << row_values.size() << ")" << std::endl;
+                    exit(AVG_FILE_FORMAT_VIOLATION);
+            }
+	    cudaMallocHost(&avgNames[line_number-1], sizeof(char)*row_values[0].length()); CUERR("Allocating host memory for a centroid name from file");
+	    row_values[0].copy(avgNames[line_number-1], row_values[0].length());
+	    row_values.erase(row_values.begin()); // remove the name
+	    avgSeqLengths[line_number-1] = row_values.size();
+	    std::stringstream ss(line);
+	    short *avg;
+	    cudaMallocHost(&avg, sizeof(short)*row_values.size()); CUERR("Allocating host memory for a centroid sequence from file");
+	    avgSequences[line_number-1] = avg;
+       	    for (int i = 0; i < row_values.size(); i++){
+                ss >> avg[i];
+            }
+	}
+	avgs_file.close();
+	return line_number;
 }
 
 /*
