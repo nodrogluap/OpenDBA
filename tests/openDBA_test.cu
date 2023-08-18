@@ -38,7 +38,7 @@ TEST_CASE( " Setup and Run " ){
 	
 	int series_buff_size = 3;
 
-	int min_segment_length = 0; // disable segmentation
+	char *min_segment_length = "0"; // disable segmentation
 	
 	// Both 0 for global
 	int use_open_start = 0;
