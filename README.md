@@ -13,11 +13,12 @@ git clone --recurse-submodules https://github.com/nodrogluap/OpenDBA/
 cd OpenDBA
 make
 ```
-OR, if you plan on using nanopore data for input you need HDF5 support (assuming you've pre-installed the [HDF5 libraries](https://www.hdfgroup.org/downloads/hdf5/)):
+OR, if you plan on using nanopore data for input you need HDF5 support (assuming you've pre-installed the [HDF5 libraries](https://www.hdfgroup.org/downloads/hdf5/)) and likely the [VBZ compression plugin](https://github.com/nanoporetech/vbz_compression):
 
 ```bash
 git clone --recurse-submodules https://github.com/nodrogluap/OpenDBA/
 cd OpenDBA
+make plugins
 make HDF5_SUPPORTED=1
 make tests HDF5_SUPPORTED=1 
 ```
@@ -26,6 +27,7 @@ OR, if you plan on using [S/BLOW5 format](https://github.com/hasindu2008/slow5to
 ```bash
 git clone --recurse-submodules https://github.com/nodrogluap/OpenDBA/
 cd OpenDBA
+make plugins
 make SLOW5_SUPPORTED=1
 make tests SLOW5_SUPPORTED=1
 ```
@@ -51,6 +53,8 @@ Outputs are in `output_prefix.pair_dists.txt` and `output_prefix.avg.txt`. See a
 Bio folks: Examples for Oxford Nanopore Technologies data analysis are provided at the bottom of this file.
 
 Comp Sci folks: An input file can also be a tab delimited values file, with one sequence per line and a sequence label in the first column of each line (a.k.a. [UCR Time Series Classification Archive format](https://www.cs.ucr.edu/~eamonn/time_series_data_2018/)). Specify `tsv` instead of `text` on the command line.
+
+Note that for large datasets (1000's to 10,000's of sequences) OpenDBA can take many hours to run, even with hardware acceleration. OpenDBA implements basic checkpointing so that the process can be killed randomly and resume roughly where it left off. This makes it friendlier for running on an HPC cluster with strict job wall time limits. If you want to restart a run with the *same output file names but different command line parameters*, please delete any existing files with the given output prefix first (to avoid checkpoint recovery from kicking in).
 
 ## Licensing
 This code is distributed under the GNU Public License v3.  Please contact the author, Paul Gordon (gordonp@ucalgary.ca), for alternative licensing possibilities.
@@ -192,7 +196,6 @@ For the moment, if you have multiple S/BLOW5 files you'd like to average at the 
 ```
 openDBA slow5 float open_end test_out 4,0 direct_rna_leader_float.txt 13 test_in.blow5 #or .slow5
 ```
-
 
 ## Finding base modifications and minor fraction variants
 
