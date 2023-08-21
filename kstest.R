@@ -22,5 +22,5 @@ for(i in 1:n) {
   pvals <- append(pvals, ks.test(posv, "pnorm", mean(posv), sd(posv))$p.value)
 }
 qvals <- p.adjust(pvals, method="fdr")
-cat("Kolmogorov-Smirnov Test (low FP):\n")
+cat("Kolmogorov-Smirnov Test (low FN):\n")
 which(qvals < .05) + as.numeric(poss[1])
