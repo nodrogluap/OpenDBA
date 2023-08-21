@@ -206,7 +206,7 @@ openDBA fast5 float open_end myexperiment 4 direct_rna_leader_float.txt 30 ont_f
 openDBA slow5 float open_end myexperiment 4 direct_rna_leader_float.txt 30 slow5_folder_name/*.blow5 #or *.slow5
 sh rna_multimodality.sh 29903 myexperiment.14
 ```
-yields three files ``myexperiment.14.multimodal.diptest.txt`` and ``myexperiment.14.multimodal.kde_smoothing_plus_excess_mass.txt`` and ``myexperiment.14.kstest``...
+yields three files ``myexperiment.14.multimodal.diptest.txt`` and ``myexperiment.14.multimodal.kde_smoothing_plus_excess_mass.txt`` and ``myexperiment.14.kstest.txt``...
 ```
 Hartigan Dip Test (low FP): 
   [1] 26053 26339 26604 26957 27320 27543 27667 27880 28215 28714 28983 29187 
