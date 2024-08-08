@@ -538,7 +538,7 @@ int readSequenceFAST5Files(char **filenames, int num_files, T ***sequences, char
 
                 size_t num_seqs_this_file = read_fast5_data<T>(filenames[i], (*sequences) + actual_count, (*sequence_names) + actual_count, (*sequence_lengths) + actual_count);
                 if(num_seqs_this_file < 1){
-                        std::cerr << "Error reading in FAST5 file " << filenames[i] << ", skipping" << std::endl;
+                        std::cerr << "No reads in FAST5 file " << filenames[i] << ", skipping" << std::endl;
                 }
                 else{
                         actual_count += num_seqs_this_file;
