@@ -573,8 +573,9 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 			}
 		}
 
-		int dtw_limit = flip_seq_order[currDevice] ? current_seq_length[currDevice] : centerLength;
+		int dtw_x_limit = flip_seq_order[currDevice] ? current_seq_length[currDevice] : centerLength;
 #if DEBUG == 1
+		int dtw_y_limit = flip_seq_order[currDevice] ? centerLength : current_seq_length[currDevice];
 		std::string cost_filename = std::string("costmatrix")+"."+std::to_string(seq_index);
 		std::ofstream cost(cost_filename);
 		if(!cost.is_open()){
@@ -585,7 +586,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 		size_t PARAM_NOT_USED = 0;
                 // We have a circular buffer in shared memory of three diagonals for minimal proper DTW calculation using White-Neely step pattern.
                 int shared_memory_required = threadblockDim.x*3*sizeof(T);
-                for(size_t offset_within_seq = 0; offset_within_seq < dtw_limit; offset_within_seq += threadblockDim.x){
+                for(size_t offset_within_seq = 0; offset_within_seq < dtw_x_limit; offset_within_seq += threadblockDim.x){
 			T *existingCosts = dtwCostSoFar[currDevice];
 			T *newCosts = newDtwCostSoFar[currDevice];
 			if(usingStripePath[currDevice]){ // In striped mode we store the result of every swath computed, so we move further into a larger cost buffer rather than recycling a smaller one.
@@ -621,7 +622,7 @@ DBAUpdate(T *C, size_t centerLength, T **sequences, char **sequence_names, size_
 				cudaMemcpyAsync(hostCosts, newCosts, dtwCostSoFarSize, cudaMemcpyDeviceToHost, seq_stream[currDevice]); CUERR("Copying DTW pairwise distance intermediate values from device to host debug printing");
 			}
 			cudaStreamSynchronize(seq_stream[currDevice]);  CUERR("Synchronizing prioritized CUDA stream mid-path for debug output");
-			for(int i = 0; i < dtw_limit; i++){
+			for(int i = 0; i < dtw_y_limit; i++){
 				cost << hostCosts[i] << ", ";
 			}
 			cost << std::endl;
