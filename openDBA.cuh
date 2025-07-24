@@ -97,6 +97,7 @@ setupAndRun(char *seqprefix_file_name, char **series_file_names, int num_series,
 				for (int j = i - num_seqs_removed + 1; j < actual_num_series; j++){ 
 					segmented_sequences[j-1] = segmented_sequences[j]; // TODO: use memmove() instead?
 					segmented_seq_lengths[j-1] = segmented_seq_lengths[j];
+					sequence_names[j-1] = sequence_names[j];
 				}
 				num_seqs_removed++;
 			}
